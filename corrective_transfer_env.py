@@ -11,6 +11,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import pandas as pd 
 import numpy as np
+import pykep as pk
 
 class CorrectiveTransferEnvironment(gym.Env):
     def __init__(self, traj_filename:str, impulse_filname:str):
@@ -39,6 +40,7 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         # thruster config
         self.max_thrust: float = 0.5 
+        self.exhaust_vel: float = 19.6133
 
 
         # define the spaces ie. all possible range of obs and action
@@ -97,13 +99,32 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         # propagate to the final timestamp 
         # NOTE: could use pykep propagate_lagrangian function (ref: https://esa.github.io/pykep/documentation/core.html#pykep.propagate_lagrangian)
+        total_impulse: np.ndarray = corrective_impulse + self.nominal_imp[self.chosen_timestamp]
+        r_next, v_next = pk.propagate_lagrangian(r0=current_state[0:2], v0=current_state[3:5], tof=self.timestep, mu=self.sun_mu)
+        m_next = self._mass_update(current_state[-1], total_impulse)
+
+        # for logging purposes
+        log_pos: np.ndarray = np.array([r_next])
+        log_vel: np.ndarray = np.array([]) # add vel after updated with nominal impulse
+        log_m: np.ndarray = np.array([m_next])
+
+        # continue propagating until the final state, incorporating the nominal impulse
+        
 
         # compute error and compute reward
 
         # terminal state, reward, done, truncated, info (unused)
         return super().step(action)
 
+    def _mass_update(self, m0: float, impulse:np.ndarray): 
+        '''
+        Implements the Tsiolkovsky Rocket Equation for the mass update. 
 
+        Arguments: 
+        - m0: the current mass at t before impulse
+        - impulse: the total impulse vector at t 
+        '''
+        return m0*np.exp(-np.linalg.norm(impulse)/self.exhaust_vel)
 
 
 
