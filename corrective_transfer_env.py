@@ -50,6 +50,9 @@ class CorrectiveTransferEnvironment(gym.Env):
         self.max_thrust: float = 0.5
         self.exhaust_vel: float = 19.6133
 
+        # reward config
+        self.penalty_scale_control: float = 10.0
+
         # define the spaces ie. all possible range of obs and action
         # NOTE: 2*au should be sufficient for the application of mars transfer
         # 2*ve at any point of the orbit results to an unbounded trajectory, which means it is unlikely for s/c have a vel beyond that
@@ -100,7 +103,8 @@ class CorrectiveTransferEnvironment(gym.Env):
         return self.state, {}
 
     def step(self, action):
-        # TODO: constrain the total impulse to vmax
+        # NOTE: current implementation of control constraints is through reward penalty, ideally we have an
+        # implicit adherance in the future
         # compute the vmax based on the mass before impulse
         vmax: float = self.max_thrust * self.timestep / self.state[-1]
 
@@ -164,18 +168,10 @@ class CorrectiveTransferEnvironment(gym.Env):
             log_pos = np.append(log_pos, [r_next], axis=0)
             log_m = np.append(log_m, m_next)
 
-        # compute error and compute reward
-        # reward structure: penalty = - |r-rf| - |v-vf|
-        r_final: np.ndarray = self.nominal_traj[-1, 0:3]
-        v_final: np.ndarray = self.nominal_traj[-1, 3:6]
-
-        # TODO: consider other forms of reward functions
-        reward: float = -np.linalg.norm(r_next - r_final) - np.linalg.norm(
-            v_next - v_final
-        )
-
         # terminal state, reward, done, truncated, info (unused)
-        return np.concatenate((r_next, v_next, [m_next])), reward, 1, 0, {}
+        gui_xf: np.ndarray = np.concatenate((r_next, v_next, [m_next]))
+        reward: float = self._reward_function(vmax, total_impulse, gui_xf)
+        return gui_xf, reward, 1, 0, {}
 
     def _mass_update(self, m0: float, impulse: np.ndarray) -> float:
         """
@@ -186,3 +182,22 @@ class CorrectiveTransferEnvironment(gym.Env):
         - impulse: the total impulse vector at t
         """
         return m0 * np.exp(-np.linalg.norm(impulse) / self.exhaust_vel)
+
+    def _reward_function(
+        self, vmax: float, total_corrective_imp: np.ndarray, gui_xf: np.ndarray
+    ) -> float:
+        reward: float = 0
+
+        # penalty for exceeding the control limits
+        control_diff: float = vmax - np.linalg.norm(total_corrective_imp)
+        if control_diff < 0:
+            reward += control_diff * self.penalty_scale_control
+
+        # penalty for dynamics
+        nom_r_final: np.ndarray = self.nominal_traj[-1, 0:3]
+        nom_v_final: np.ndarray = self.nominal_traj[-1, 3:6]
+        reward += -np.linalg.norm(gui_xf[0:3] - nom_r_final) - np.linalg.norm(
+            gui_xf[3:6] - nom_v_final
+        )
+
+        return reward
