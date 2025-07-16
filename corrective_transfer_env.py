@@ -7,6 +7,7 @@ General Notes:
 """
 
 import random
+import copy
 
 import gymnasium as gym
 from gymnasium import spaces
@@ -116,61 +117,74 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         # add the corrective impulse to the current state
         # creates a symbolic link rather than a copy
-        current_pos: np.ndarray = self.state[0:3]
-        current_vel: np.ndarray = self.state[3:6]
-        current_m: float = self.state[-1]
+        no_guid_pos: np.ndarray = copy.deepcopy(self.state[0:3])
+        no_guid_vel: np.ndarray = copy.deepcopy(self.state[3:6])
+        no_guid_m: float = copy.deepcopy(self.state[-1])
 
-        current_vel += corrective_impulse
+        guid_pos: np.ndarray = copy.deepcopy(self.state[0:3])
+        guid_vel: np.ndarray = copy.deepcopy(self.state[3:6]) + corrective_impulse
+        guid_m: float = copy.deepcopy(self.state[-1])
 
         # propagate to the final timestamp
         # NOTE: could use pykep propagate_lagrangian function (ref: https://esa.github.io/pykep/documentation/core.html#pykep.propagate_lagrangian)
-        total_impulse: np.ndarray = (
-            corrective_impulse + self.nominal_imp[self.chosen_timestamp]
-        )
+        nominal_impulse: np.ndarray = self.nominal_imp[self.chosen_timestamp]
+        total_impulse: np.ndarray = corrective_impulse + nominal_impulse
 
-        r_next, v_next = np.array(
+        no_guid_m = self._mass_update(no_guid_m, nominal_impulse)
+        guid_m = self._mass_update(guid_m, total_impulse)
+
+        no_guid_pos, no_guid_vel = np.array(
             pk.propagate_lagrangian(
-                r0=current_pos,
-                v0=current_vel,
+                r0=no_guid_pos,
+                v0=no_guid_vel,
                 tof=self.timestep,
                 mu=self.sun_mu,
             )
         )
-        m_next = self._mass_update(current_m, total_impulse)
-
-        # for logging purposes
-        log_pos: np.ndarray = np.array([current_pos, r_next])
-        log_vel: np.ndarray = np.array([current_vel])
-        log_m: np.ndarray = np.array([current_m, m_next])
+        guid_pos, guid_vel = np.array(
+            pk.propagate_lagrangian(
+                r0=guid_pos,
+                v0=guid_vel,
+                tof=self.timestep,
+                mu=self.sun_mu,
+            )
+        )
 
         # continue propagating until the final state, incorporating the nominal impulse
         for i in range(self.chosen_timestamp + 1, self.num_timesteps + 1):
-            applied_impulse: np.ndarray = self.nominal_imp[i]
-            v_next += applied_impulse
-            log_vel = np.append(log_vel, [v_next], axis=0)
+            nominal_impulse = self.nominal_imp[i]
+
+            no_guid_vel += nominal_impulse
+            guid_vel += nominal_impulse
 
             # final state reached, no need propagation
             if i == self.num_timesteps:
                 break
 
-            # propagate next step
-            r_next, v_next = np.array(
+            no_guid_pos, no_guid_vel = np.array(
                 pk.propagate_lagrangian(
-                    r0=r_next,
-                    v0=v_next,
+                    r0=no_guid_pos,
+                    v0=no_guid_vel,
                     tof=self.timestep,
                     mu=self.sun_mu,
                 )
             )
-            m_next = self._mass_update(m_next, applied_impulse)
+            guid_pos, guid_vel = np.array(
+                pk.propagate_lagrangian(
+                    r0=guid_pos,
+                    v0=guid_vel,
+                    tof=self.timestep,
+                    mu=self.sun_mu,
+                )
+            )
 
-            # update logging
-            log_pos = np.append(log_pos, [r_next], axis=0)
-            log_m = np.append(log_m, m_next)
+            no_guid_m = self._mass_update(no_guid_m, nominal_impulse)
+            guid_m = self._mass_update(guid_m, nominal_impulse)
 
         # terminal state, reward, done, truncated, info (unused)
-        gui_xf: np.ndarray = np.concatenate((r_next, v_next, [m_next]))
-        reward: float = self._reward_function(vmax, total_impulse, gui_xf)
+        no_gui_xf: np.ndarray = np.concatenate((no_guid_pos, no_guid_vel, [no_guid_m]))
+        gui_xf: np.ndarray = np.concatenate((guid_pos, guid_vel, [guid_m]))
+        reward: float = self._reward_function(vmax, total_impulse, gui_xf, no_gui_xf)
         return gui_xf, reward, 1, 0, {}
 
     def _mass_update(self, m0: float, impulse: np.ndarray) -> float:
@@ -184,7 +198,11 @@ class CorrectiveTransferEnvironment(gym.Env):
         return m0 * np.exp(-np.linalg.norm(impulse) / self.exhaust_vel)
 
     def _reward_function(
-        self, vmax: float, total_corrective_imp: np.ndarray, gui_xf: np.ndarray
+        self,
+        vmax: float,
+        total_corrective_imp: np.ndarray,
+        guid_xf: np.ndarray,
+        no_guid_xf: np.ndarray,
     ) -> float:
         reward: float = 0
 
@@ -193,11 +211,17 @@ class CorrectiveTransferEnvironment(gym.Env):
         if control_diff < 0:
             reward += control_diff * self.penalty_scale_control
 
-        # penalty for dynamics
-        nom_r_final: np.ndarray = self.nominal_traj[-1, 0:3]
-        nom_v_final: np.ndarray = self.nominal_traj[-1, 3:6]
-        reward += -np.linalg.norm(gui_xf[0:3] - nom_r_final) - np.linalg.norm(
-            gui_xf[3:6] - nom_v_final
-        )
+        # reward/penalty for dynamics
+        nom_rv_final: np.ndarray = self.nominal_traj
+        error_no_guid: np.ndarray = no_guid_xf - nom_rv_final
+        error_guid: np.ndarray = guid_xf - nom_rv_final
+
+        # NOTE: for now euclidean, can change into weighted norm
+        reward += np.linalg.norm(error_no_guid[0:6]) - np.linalg.norm(error_guid[0:6])
+
+        # reward/penalty for effort
+        reward += np.linalg.norm(
+            self.nominal_imp[self.chosen_timestamp]
+        ) - np.linalg.norm(total_corrective_imp)
 
         return reward
