@@ -56,9 +56,6 @@ class CorrectiveTransferEnvironment(gym.Env):
         self.penalty_scale_dynamics: float = 10.0
 
         # define the spaces ie. all possible range of obs and action
-        # NOTE: 2*au should be sufficient for the application of mars transfer
-        # 2*ve at any point of the orbit results to an unbounded trajectory, which means it is unlikely for s/c have a vel beyond that
-        # as interplanetary transfers in heliocentric frame would always be elliptical
         # [rx, ry, rz, vx, vy, vz, m]
         earth_constraints: np.ndarray = np.array(
             [self.au, self.au, self.au, self.ve, self.ve, self.ve]
@@ -109,12 +106,18 @@ class CorrectiveTransferEnvironment(gym.Env):
         # implicit adherance in the future
         # compute the vmax based on the mass before impulse
         vmax: float = self.max_thrust * self.timestep / self.state[-1]
+        nominal_impulse: np.ndarray = self.nominal_imp[self.chosen_timestamp]
 
         # compute the corrective impulse vector
         action_dir: np.ndarray = np.array(action[1:4])
         corrective_impulse: np.ndarray = (
-            vmax * (1 + action[0]) / 2 * action_dir / np.linalg.norm(action_dir)
+            np.linalg.norm(nominal_impulse)
+            * (1 + action[0])
+            / 2
+            * action_dir
+            / np.linalg.norm(action_dir)
         )
+        total_impulse: np.ndarray = corrective_impulse + nominal_impulse
 
         # add the corrective impulse to the current state
         # creates a symbolic link rather than a copy
@@ -128,8 +131,6 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         # propagate to the final timestamp
         # NOTE: could use pykep propagate_lagrangian function (ref: https://esa.github.io/pykep/documentation/core.html#pykep.propagate_lagrangian)
-        nominal_impulse: np.ndarray = self.nominal_imp[self.chosen_timestamp]
-        total_impulse: np.ndarray = corrective_impulse + nominal_impulse
 
         no_guid_m = self._mass_update(no_guid_m, nominal_impulse)
         guid_m = self._mass_update(guid_m, total_impulse)
@@ -186,7 +187,7 @@ class CorrectiveTransferEnvironment(gym.Env):
         no_gui_xf: np.ndarray = np.concatenate((no_guid_pos, no_guid_vel, [no_guid_m]))
         gui_xf: np.ndarray = np.concatenate((guid_pos, guid_vel, [guid_m]))
         reward: float = self._reward_function(vmax, total_impulse, gui_xf, no_gui_xf)
-        return gui_xf, reward, 1, 0, {}
+        return gui_xf, reward, True, False, {}
 
     def _mass_update(self, m0: float, impulse: np.ndarray) -> float:
         """
