@@ -8,6 +8,7 @@ This also contains test training scripts for the gym.
 
 import gymnasium as gym
 import numpy as np
+from stable_baselines3 import PPO
 
 from corrective_transfer_env import CorrectiveTransferEnvironment
 
@@ -29,6 +30,10 @@ def test_prop():
     assert reward == 0, "Error between guided and unguided trajectory"
 
     print("PASS")
+
+
+def test_script():
+    pass
 
 
 if __name__ == "__main__":
