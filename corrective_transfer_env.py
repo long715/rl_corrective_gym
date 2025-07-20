@@ -54,6 +54,7 @@ class CorrectiveTransferEnvironment(gym.Env):
         # reward config
         self.penalty_scale_control: float = 10.0
         self.penalty_scale_dynamics: float = 10.0
+        self.penalty_scale_effort: float = 10.0
 
         # define the spaces ie. all possible range of obs and action
         # [rx, ry, rz, vx, vy, vz, m]
@@ -206,15 +207,12 @@ class CorrectiveTransferEnvironment(gym.Env):
         guid_xf: np.ndarray,
         no_guid_xf: np.ndarray,
     ) -> float:
-        """
-        TODO: normalise and scale the rewards
-        """
         reward: float = 0
 
         # penalty for exceeding the control limits
         control_diff: float = vmax - np.linalg.norm(total_corrective_imp)
         if control_diff < 0:
-            reward += control_diff * self.penalty_scale_control
+            reward += control_diff / vmax * self.penalty_scale_control
 
         # reward/penalty for dynamics
         nom_rv_final: np.ndarray = self.nominal_traj[-1, :]
@@ -222,11 +220,19 @@ class CorrectiveTransferEnvironment(gym.Env):
         error_guid: np.ndarray = guid_xf - nom_rv_final
 
         # NOTE: for now euclidean, can change into weighted norm
-        reward += np.linalg.norm(error_no_guid[0:6]) - np.linalg.norm(error_guid[0:6])
+        error_no_guid_mag: float = np.linalg.norm(error_no_guid[0:6])
+        reward += (
+            (error_no_guid_mag - np.linalg.norm(error_guid[0:6]))
+            / error_no_guid_mag
+            * self.penalty_scale_dynamics
+        )
 
         # reward/penalty for effort
-        reward += np.linalg.norm(
-            self.nominal_imp[self.chosen_timestamp]
-        ) - np.linalg.norm(total_corrective_imp)
+        nominal_imp_mag: float = np.linalg.norm(self.nominal_imp[self.chosen_timestamp])
+        reward += (
+            (nominal_imp_mag - np.linalg.norm(total_corrective_imp))
+            / nominal_imp_mag
+            * self.penalty_scale_effort
+        )
 
         return reward
