@@ -6,10 +6,13 @@ This file defines the test suite for the corrective transfer gym, build to valid
 This also contains test training scripts for the gym.
 """
 
+import argparse
+
 import gymnasium as gym
 import numpy as np
 import stable_baselines3 as sb3
 from stable_baselines3.common import env_checker
+from stable_baselines3.common.evaluation import evaluate_policy
 
 from corrective_transfer_env import CorrectiveTransferEnvironment
 
@@ -55,12 +58,53 @@ def test_sb3_integration():
     env_checker.check_env(env, warn=False, skip_render_check=True)
 
 
-def test_script():
+def test_train(algo: str):
     env: gym.Env = CorrectiveTransferEnvironment("SCP_impulsive_traj.csv", "SCP_dV.csv")
-    model: sb3.PPO = sb3.PPO("MlpPolicy", env, verbose=1, n_steps=2)
+
+    if algo == "PPO":
+        model: sb3.PPO = sb3.PPO("MlpPolicy", env, verbose=1, n_steps=2)
+    else:
+        model: sb3.SAC = sb3.SAC("MlpPolicy", env, verbose=1)
+
     model.learn(25000)
-    model.save("corrective_env_test")
+    model.save("corrective_env_test_" + algo)
+
+
+def test_eval(algo: str):
+    env: gym.Env = CorrectiveTransferEnvironment("SCP_impulsive_traj.csv", "SCP_dV.csv")
+
+    if algo == "PPO":
+        model: sb3.PPO = sb3.PPO.load("corrective_env_test_PPO", env=env)
+    else:
+        model: sb3.SAC = sb3.SAC.load("corrective_env_test_SAC", env=env)
+
+    mean_reward, std_reward = evaluate_policy(
+        model, model.get_env(), n_eval_episodes=100
+    )
+    print(mean_reward, std_reward)
 
 
 if __name__ == "__main__":
-    test_script()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--algo", required=True, type=str, default="PPO", choices=["PPO", "SAC"]
+    )
+    parser.add_argument(
+        "--task",
+        required=True,
+        type=str,
+        default="train",
+        choices=["prop", "max_control", "sb3_integration", "train", "eval"],
+    )
+    args = parser.parse_args()
+
+    if args.task == "prop":
+        test_prop()
+    elif args.task == "max_control":
+        test_max_control()
+    elif args.task == "sb3_integration":
+        test_sb3_integration()
+    elif args.task == "train":
+        test_train(args.algo)
+    else:
+        test_eval(args.algo)
