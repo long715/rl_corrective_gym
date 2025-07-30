@@ -16,7 +16,7 @@ import pandas as pd
 import numpy as np
 import pykep as pk
 
-from environments.space.space_env_config import SpaceEnvironmentConfig
+from space_env_config import SpaceEnvironmentConfig
 
 
 class CorrectiveTransferEnvironment(gym.Env):

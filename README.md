@@ -6,8 +6,15 @@
 - install stable-baselines3 with pip (currently unstable in conda-forge) `pip install stable-baselines3`
 
 notes: 
-- need to be python v3.11 for cares-rl, have to `pip install torch==2.7.0 opencv-contrib-python==4.6.0.66 scikit_image==0.25.2`
+- need to be python v3.11 for cares-rl `conda install python=3.11`
+- have to `pip install torch==2.7.0 opencv-contrib-python==4.6.0.66 scikit_image==0.25.2`
 - need to pip install some packages for gymnasium_env, `pip install dm_control==1.0.26`
 
 # Run
-`python run.py train config --data_path ..\..\space_configs\`
+`python run.py train config --data_path ../../rl_corrective_gym/rl_corrective_gym/space_configs`
+- need to use / in MacOS
+- mps not supported, need to use cpu in MacOS
+
+# Documentation 
+- replace the parser with custom env config class
+- change the function name for obs space shape
