@@ -16,7 +16,7 @@ import pandas as pd
 import numpy as np
 import pykep as pk
 
-from space_env_config import SpaceEnvironmentConfig
+from rl_corrective_gym.gym_env_setup.space_env_config import SpaceEnvironmentConfig
 
 
 class CorrectiveTransferEnvironment(gym.Env):
@@ -36,13 +36,13 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         # define required information from SCP data
         self.nominal_traj: np.ndarray = pd.read_csv(
-            f"../../nominal_trajectory/{traj_filename}"
+            f"../../rl_corrective_gym/rl_corrective_gym/nominal_trajectory/{traj_filename}"
         ).to_numpy()
 
         self.num_timesteps: int = len(self.nominal_traj) - 1
         self.max_m: float = self.nominal_traj[0, -1]
         self.nominal_imp: np.ndarray = pd.read_csv(
-            f"../../nominal_trajectory/{impulse_filename}"
+            f"../../rl_corrective_gym/rl_corrective_gym/nominal_trajectory/{impulse_filename}"
         ).to_numpy()
 
         # task config (doi: 10.1016/j.actaastro.2023.10.018)
@@ -233,7 +233,13 @@ class CorrectiveTransferEnvironment(gym.Env):
         no_gui_xf: np.ndarray = np.concatenate((no_guid_pos, no_guid_vel, [no_guid_m]))
         gui_xf: np.ndarray = np.concatenate((guid_pos, guid_vel, [guid_m]))
         reward: float = self._reward_function(vmax, total_impulse, gui_xf, no_gui_xf)
-        return gui_xf, reward, True, False
+        info: dict = {
+            "timestep": self.chosen_timestamp,
+            "noise": self.noise,
+            "corrective_impulse": corrective_impulse,
+            "terminal_state": gui_xf,
+        }
+        return gui_xf, reward, True, False, info
 
     def _mass_update(self, m0: float, impulse: np.ndarray) -> float:
         """
