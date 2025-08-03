@@ -148,21 +148,11 @@ class CorrectiveTransferEnvironment(gym.Env):
         return self.state
 
     def step(self, action) -> tuple:
-        # NOTE: current implementation of control constraints is through reward penalty, ideally we have an
-        # implicit adherance in the future
         # compute the vmax based on the mass before impulse
         vmax: float = self.max_thrust * self.timestep / self.state[-1]
         nominal_impulse: np.ndarray = self.nominal_imp[self.chosen_timestamp]
 
-        # compute the corrective impulse vector
-        action_dir: np.ndarray = np.array(action[1:4])
-        corrective_impulse: np.ndarray = (
-            np.linalg.norm(nominal_impulse)
-            * (1 + action[0])
-            / 2
-            * action_dir
-            / np.linalg.norm(action_dir)
-        )
+        corrective_impulse: np.ndarray = self._get_control_input(vmax, action)
         total_impulse: np.ndarray = corrective_impulse + nominal_impulse
 
         # add the corrective impulse to the current state
@@ -287,3 +277,75 @@ class CorrectiveTransferEnvironment(gym.Env):
         )
 
         return reward
+
+    def _get_control_input(self, vmax: float, action) -> np.ndarray:
+        """
+        Computes a feasible control input (for bounded ie. nominal <= vmax). Doesn't guarantee feasibility for unbounded ie. control direction never reaches the threshold OR control magnitude
+        percentage is too small.
+
+        Arguments:
+        - vmax: maximum impulsive velocity magnitude AFTER perturbation
+        - action: sampled action for the step
+        """
+        nominal_impulse: np.ndarray = self.nominal_imp[self.chosen_timestamp]
+        nominal_mag: float = np.linalg.norm(nominal_impulse)
+        nominal_unit: np.ndarray = nominal_impulse / nominal_mag
+
+        action_dir: np.ndarray = np.array(action[1:4])
+        action_unit: np.ndarray = action_dir / np.linalg.norm(action_dir)
+
+        theta_act_nom: float = np.degrees(np.arccos(np.dot(nominal_unit, action_unit)))
+        corrective_mag: float = 0
+
+        if nominal_mag == vmax:
+            if theta_act_nom <= 90:
+                # if direction is <= 90 deg, not feasible so max corrective impulse is zero
+                corrective_mag = 0
+            elif theta_act_nom == 180:
+                corrective_mag = 2 * vmax
+            else:  # > 90, < 180: use line of cosine
+                corrective_mag = self._law_of_cosine(theta_act_nom, nominal_mag, vmax)
+
+        elif nominal_mag < vmax:
+            if theta_act_nom == 0:
+                corrective_mag = vmax - nominal_mag
+            elif theta_act_nom == 180:
+                corrective_mag = vmax + nominal_mag
+            else:  # > 0, < 180
+                corrective_mag = self._law_of_cosine(theta_act_nom, nominal_mag, vmax)
+
+        else:  # unbounded case
+            min_theta: float = 180 - np.degrees(np.arcsin(vmax / nominal_mag))
+
+            if theta_act_nom < min_theta:
+                # will never intercept with threshold in this direction, use vmax
+                corrective_mag = vmax
+            elif theta_act_nom == 180:
+                corrective_mag = vmax + nominal_mag
+            else:
+                # should return the second intersection so have partial guarantees of feasibility
+                corrective_mag = self._law_of_cosine(theta_act_nom, nominal_mag, vmax)
+
+        return corrective_mag * (1 + action[0]) / 2 * action_unit
+
+    def _law_of_cosine(self, theta: float, a: float, c: float):
+        """
+        law of cosine: c^2 = a^2 + b^2 - 2ab cos(theta')
+
+        b^2 + Ab + B = 0
+        where:
+            A = -2a cos(theta')
+            B = a^2 - c^2
+            theta' = 180 - theta
+
+        return the positive root
+
+        Arguments:
+        - theta: in degrees
+        - a, c: adjacent and opposite sides
+        """
+        A: float = -2 * a * np.cos(np.radians(180 - theta))
+        B: float = np.power(a, 2) - np.power(c, 2)
+        roots: np.ndarray = np.roots([1, A, B])
+
+        return np.max(roots)
