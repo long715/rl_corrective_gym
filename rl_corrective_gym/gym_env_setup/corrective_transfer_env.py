@@ -61,7 +61,7 @@ class CorrectiveTransferEnvironment(gym.Env):
         self.exhaust_vel: float = config.exhaust_vel
 
         # reward
-        self.penalty_scale_control: float = 10.0
+        self.penalty_scale_control: float = 100.0
         self.penalty_scale_dynamics: float = 10.0
         self.penalty_scale_effort: float = 10.0
 
@@ -222,7 +222,9 @@ class CorrectiveTransferEnvironment(gym.Env):
         # terminal state, reward, done, truncated, info (unused)
         no_gui_xf: np.ndarray = np.concatenate((no_guid_pos, no_guid_vel, [no_guid_m]))
         gui_xf: np.ndarray = np.concatenate((guid_pos, guid_vel, [guid_m]))
-        reward: float = self._reward_function(vmax, total_impulse, gui_xf, no_gui_xf)
+        reward: float = self._reward_function(
+            vmax, corrective_impulse, gui_xf, no_gui_xf
+        )
         info: dict = {
             "timestep": self.chosen_timestamp,
             "noise": self.noise,
@@ -244,16 +246,38 @@ class CorrectiveTransferEnvironment(gym.Env):
     def _reward_function(
         self,
         vmax: float,
-        total_corrective_imp: np.ndarray,
+        control_imp: np.ndarray,
         guid_xf: np.ndarray,
         no_guid_xf: np.ndarray,
     ) -> float:
         reward: float = 0
 
+        nominal_imp: np.ndarray = self.nominal_imp[self.chosen_timestamp]
+        total_corrective_imp: np.ndarray = nominal_imp + control_imp
+
+        # reward/penalty for effort
+        nominal_imp_mag: float = np.linalg.norm(nominal_imp)
+        reward += (
+            (nominal_imp_mag - np.linalg.norm(total_corrective_imp))
+            / nominal_imp_mag
+            * self.penalty_scale_effort
+        )
+
         # penalty for exceeding the control limits
         control_diff: float = vmax - np.linalg.norm(total_corrective_imp)
         if control_diff < 0:
-            reward += control_diff / vmax * self.penalty_scale_control
+            reward += (control_diff / vmax) * self.penalty_scale_control
+
+        # penalty for not reaching the min theta - only for unbounded case
+        if nominal_imp_mag > vmax:
+            nominal_unit: np.ndarray = nominal_imp / nominal_imp_mag
+            control_unit: np.ndarray = control_imp / np.linalg.norm(control_imp)
+            theta: float = np.degrees(np.arccos(np.dot(nominal_unit, control_unit)))
+            min_theta: float = 180 - np.degrees(np.arcsin(vmax / nominal_imp_mag))
+            if theta < min_theta:
+                reward += (
+                    -((min_theta - theta) / min_theta) * self.penalty_scale_control
+                )
 
         # reward/penalty for dynamics
         nom_rv_final: np.ndarray = self.nominal_traj[-1, :]
@@ -266,14 +290,6 @@ class CorrectiveTransferEnvironment(gym.Env):
             (error_no_guid_mag - np.linalg.norm(error_guid[0:6]))
             / error_no_guid_mag
             * self.penalty_scale_dynamics
-        )
-
-        # reward/penalty for effort
-        nominal_imp_mag: float = np.linalg.norm(self.nominal_imp[self.chosen_timestamp])
-        reward += (
-            (nominal_imp_mag - np.linalg.norm(total_corrective_imp))
-            / nominal_imp_mag
-            * self.penalty_scale_effort
         )
 
         return reward
