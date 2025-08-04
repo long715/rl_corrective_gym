@@ -18,7 +18,7 @@ RUN bash -c "git clone https://github.com/UoA-CARES/cares_reinforcement_learning
     cd cares_reinforcement_learning &&\
     source /opt/conda/etc/profile.d/conda.sh &&\
     conda activate  corrective-mars &&\
-    conda install setuptools==79.0.0 pytest==7.4.2 matplotlib==3.10.1 pandas==1.5.3 PyYAML==6.0.1 &&\ 
+    conda install setuptools==79.0.0 pytest==7.4.2 matplotlib==3.10.1 pandas==1.5.3 PyYAML==6.0.1 seaborn==0.13.0 numpy==1.26.4 pydantic==1.10.13 &&\ 
     pip install torch==2.7.0 opencv-contrib-python==4.6.0.66 scikit_image==0.25.2 &&\
     pip install --editable . &&\
     cd .."
@@ -33,6 +33,8 @@ RUN bash -c "git clone https://github.com/UoA-CARES/gymnasium_envrionments.git &
     cd .."
 
 RUN git clone https://github.com/long715/rl_corrective_gym.git &&\ 
-    cd gymnasium_envrionments/scripts     
+    cd rl_corrective_gym &&\
+    pip install --editable . &&\
+    cd ../gymnasium_envrionments/scripts    
 
 # run the following after building: docker run -it --gpus all -v ~/cares_rl_logs:/root/cares_rl_logs space-image bash

@@ -15,6 +15,11 @@ notes:
 - need to use / in MacOS
 - mps not supported, need to use cpu in MacOS
 
+# Using the Docker container
+- transfer Dockerfile to server `scp Dockerfile user@ip:/env_dir/`; `scp source target`
+- build the Dockerfile `docker buildx build -t space-image .`
+- run and open an interactive bash shell for the container `docker run -it --gpus all -v ~/cares_rl_logs:/root/cares_rl_logs space-image bash`, this also mounts the results to the cares_log in the server
+
 # Documentation 
 - replace the parser with custom env config class
 - change the function name for obs space shape
