@@ -32,9 +32,12 @@ RUN bash -c "git clone https://github.com/UoA-CARES/gymnasium_envrionments.git &
     git checkout space-gym &&\
     cd .."
 
-RUN git clone https://github.com/long715/rl_corrective_gym.git &&\ 
+RUN bash -c "git clone https://github.com/long715/rl_corrective_gym.git &&\ 
     cd rl_corrective_gym &&\
+    source /opt/conda/etc/profile.d/conda.sh &&\
+    conda activate  corrective-mars &&\
     pip install --editable . &&\
-    cd ../gymnasium_envrionments/scripts    
+    cd ../gymnasium_envrionments/scripts &&\
+    python run.py train config --data_path ../../rl_corrective_gym/rl_corrective_gym/space_configs"    
 
 # run the following after building: docker run -it --gpus all -v ~/cares_rl_logs:/root/cares_rl_logs space-image bash
