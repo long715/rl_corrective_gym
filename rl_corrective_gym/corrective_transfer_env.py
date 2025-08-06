@@ -16,7 +16,7 @@ import numpy as np
 import pykep as pk
 
 
-class CorrectiveTransferEnvironment(gym.Env):
+class OldCorrectiveTransferEnvironment(gym.Env):
     def __init__(self, traj_filename: str, impulse_filname: str):
         super().__init__()
 

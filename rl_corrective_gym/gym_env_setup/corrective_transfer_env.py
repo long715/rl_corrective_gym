@@ -54,7 +54,6 @@ class CorrectiveTransferEnvironment(gym.Env):
         # dynamics uncertainties config (in km)
         self.dyn_pos_sd: float = config.dyn_pos_sd
         self.dyn_vel_sd: float = config.dyn_vel_sd
-        self.dyn_m_sd: float = config.dyn_m_sd
 
         # thruster config
         self.max_thrust: float = config.max_thrust
@@ -134,14 +133,15 @@ class CorrectiveTransferEnvironment(gym.Env):
         # covariance matrix set up
         pos_var: float = np.power(self.dyn_pos_sd, 2)
         vel_var: float = np.power(self.dyn_vel_sd, 2)
-        m_var: float = np.power(self.dyn_m_sd, 2)
         cov: np.ndarray = np.diag(
-            [pos_var, pos_var, pos_var, vel_var, vel_var, vel_var, m_var]
+            [pos_var, pos_var, pos_var, vel_var, vel_var, vel_var]
         )
-        mean: np.ndarray = np.array([0] * 7)
+        mean: np.ndarray = np.array([0] * 6)
 
         # choose the gaussian noise for the chosen state
-        self.noise = np.random.multivariate_normal(mean, cov)
+        self.noise = np.concatenate(
+            (np.random.multivariate_normal(mean, cov), np.array([0]))
+        )
         self.state = chosen_state + self.noise
 
         # obs
@@ -222,16 +222,19 @@ class CorrectiveTransferEnvironment(gym.Env):
         # terminal state, reward, done, truncated, info (unused)
         no_gui_xf: np.ndarray = np.concatenate((no_guid_pos, no_guid_vel, [no_guid_m]))
         gui_xf: np.ndarray = np.concatenate((guid_pos, guid_vel, [guid_m]))
-        reward: float = self._reward_function(
-            vmax, corrective_impulse, gui_xf, no_gui_xf
+        total_reward, reward_effort, reward_control_penalty, reward_dyn = (
+            self._reward_function(vmax, corrective_impulse, gui_xf, no_gui_xf)
         )
         info: dict = {
+            "reward_effort": reward_effort,
+            "reward_control_penalty": reward_control_penalty,
+            "reward_dyn": reward_dyn,
             "timestep": self.chosen_timestamp,
             "noise": self.noise,
             "corrective_impulse": corrective_impulse,
             "terminal_state": gui_xf,
         }
-        return gui_xf, reward, True, False, info
+        return gui_xf, total_reward, True, False, info
 
     def _mass_update(self, m0: float, impulse: np.ndarray) -> float:
         """
@@ -249,35 +252,24 @@ class CorrectiveTransferEnvironment(gym.Env):
         control_imp: np.ndarray,
         guid_xf: np.ndarray,
         no_guid_xf: np.ndarray,
-    ) -> float:
-        reward: float = 0
-
+    ):
         nominal_imp: np.ndarray = self.nominal_imp[self.chosen_timestamp]
         total_corrective_imp: np.ndarray = nominal_imp + control_imp
 
         # reward/penalty for effort
         nominal_imp_mag: float = np.linalg.norm(nominal_imp)
-        reward += (
+        reward_effort: float = (
             (nominal_imp_mag - np.linalg.norm(total_corrective_imp))
             / nominal_imp_mag
             * self.penalty_scale_effort
         )
 
         # penalty for exceeding the control limits
+        # NOTE: with constraints, this should be zero
         control_diff: float = vmax - np.linalg.norm(total_corrective_imp)
+        reward_control_penalty: float = 0
         if control_diff < 0:
-            reward += (control_diff / vmax) * self.penalty_scale_control
-
-        # penalty for not reaching the min theta - only for unbounded case
-        if nominal_imp_mag > vmax:
-            nominal_unit: np.ndarray = nominal_imp / nominal_imp_mag
-            control_unit: np.ndarray = control_imp / np.linalg.norm(control_imp)
-            theta: float = np.degrees(np.arccos(np.dot(nominal_unit, control_unit)))
-            min_theta: float = 180 - np.degrees(np.arcsin(vmax / nominal_imp_mag))
-            if theta < min_theta:
-                reward += (
-                    -((min_theta - theta) / min_theta) * self.penalty_scale_control
-                )
+            reward_control_penalty = (control_diff / vmax) * self.penalty_scale_control
 
         # reward/penalty for dynamics
         nom_rv_final: np.ndarray = self.nominal_traj[-1, :]
@@ -286,62 +278,38 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         # NOTE: for now euclidean, can change into weighted norm
         error_no_guid_mag: float = np.linalg.norm(error_no_guid[0:6])
-        reward += (
+        reward_dyn = (
             (error_no_guid_mag - np.linalg.norm(error_guid[0:6]))
             / error_no_guid_mag
             * self.penalty_scale_dynamics
         )
 
-        return reward
+        total_reward: float = reward_effort + reward_control_penalty + reward_dyn
+        return total_reward, reward_effort, reward_control_penalty, reward_dyn
 
     def _get_control_input(self, vmax: float, action) -> np.ndarray:
         """
-        Computes a feasible control input (for bounded ie. nominal <= vmax). Doesn't guarantee feasibility for unbounded ie. control direction never reaches the threshold OR control magnitude
-        percentage is too small.
+        As the mass is unchanged, chosen control input will always be bounded.
+        We can find the vmax at a given direction by solving for u in the following:
+        || v_norm + u*control_dir_unit|| = vmax
+        ||v||^2 + u^2 + 2u v.i = vmax
 
-        Arguments:
-        - vmax: maximum impulsive velocity magnitude AFTER perturbation
-        - action: sampled action for the step
+        which can be rearraged to a quadratic formula:
+        u^2 + Au + B = 0
+        A = 2 v.i
+        B = ||v||^2 - vmax^2
+
+        chosen u will be max of the roots
         """
-        nominal_impulse: np.ndarray = self.nominal_imp[self.chosen_timestamp]
-        nominal_mag: float = np.linalg.norm(nominal_impulse)
-        nominal_unit: np.ndarray = nominal_impulse / nominal_mag
-
+        nominal_imp: np.ndarray = self.nominal_imp[self.chosen_timestamp]
         action_dir: np.ndarray = np.array(action[1:4])
         action_unit: np.ndarray = action_dir / np.linalg.norm(action_dir)
 
-        theta_act_nom: float = np.degrees(np.arccos(np.dot(nominal_unit, action_unit)))
-        corrective_mag: float = 0
+        A: float = 2 * np.dot(nominal_imp, action_unit)
+        B: float = np.power(np.linalg.norm(nominal_imp), 2) - np.power(vmax, 2)
+        roots: np.ndarray = np.roots([1, A, B])
 
-        if nominal_mag == vmax:
-            if theta_act_nom <= 90:
-                # if direction is <= 90 deg, not feasible so max corrective impulse is zero
-                corrective_mag = 0
-            elif theta_act_nom == 180:
-                corrective_mag = 2 * vmax
-            else:  # > 90, < 180: use line of cosine
-                corrective_mag = self._law_of_cosine(theta_act_nom, nominal_mag, vmax)
-
-        elif nominal_mag < vmax:
-            if theta_act_nom == 0:
-                corrective_mag = vmax - nominal_mag
-            elif theta_act_nom == 180:
-                corrective_mag = vmax + nominal_mag
-            else:  # > 0, < 180
-                corrective_mag = self._law_of_cosine(theta_act_nom, nominal_mag, vmax)
-
-        else:  # unbounded case
-            min_theta: float = 180 - np.degrees(np.arcsin(vmax / nominal_mag))
-
-            if theta_act_nom < min_theta:
-                # will never intercept with threshold in this direction, use vmax
-                corrective_mag = vmax
-            elif theta_act_nom == 180:
-                corrective_mag = vmax + nominal_mag
-            else:
-                # should return the second intersection so have partial guarantees of feasibility
-                corrective_mag = self._law_of_cosine(theta_act_nom, nominal_mag, vmax)
-
+        corrective_mag = np.max(roots)
         return corrective_mag * (1 + action[0]) / 2 * action_unit
 
     def _law_of_cosine(self, theta: float, a: float, c: float):
