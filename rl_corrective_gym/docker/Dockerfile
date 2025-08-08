@@ -28,13 +28,14 @@ RUN bash -c "git clone https://github.com/UoA-CARES/gymnasium_envrionments.git &
     conda install mujoco==3.2.6 mediapy==1.1.9 natsort==8.4.0 &&\ 
     pip install dm_control==1.0.26  &&\
     cd gymnasium_envrionments &&\
-    git checkout 5b6a40245031d758f466278d73a49d312f2927da"
+    git checkout 3b3562fdb7ea77a4dd56343324fada998564c667"
 
 RUN bash -c "git clone https://github.com/long715/rl_corrective_gym.git &&\ 
     cd rl_corrective_gym &&\
     source /opt/conda/etc/profile.d/conda.sh &&\
     conda activate  corrective-mars &&\
-    pip install --editable ."   
+    pip install --editable . &&\ 
+    git checkout 2b5305ac176e3576d69bdf8948bfa40a25f90b3b"   
 
 WORKDIR /space-task/gymnasium_envrionments/scripts
 

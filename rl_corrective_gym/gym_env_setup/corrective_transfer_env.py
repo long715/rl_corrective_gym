@@ -150,87 +150,25 @@ class CorrectiveTransferEnvironment(gym.Env):
     def step(self, action) -> tuple:
         # compute the vmax based on the mass before impulse
         vmax: float = self.max_thrust * self.timestep / self.state[-1]
-        nominal_impulse: np.ndarray = self.nominal_imp[self.chosen_timestamp]
-
         corrective_impulse: np.ndarray = self._get_control_input(vmax, action)
-        total_impulse: np.ndarray = corrective_impulse + nominal_impulse
-
-        # add the corrective impulse to the current state
-        # creates a symbolic link rather than a copy
-        no_guid_pos: np.ndarray = copy.deepcopy(self.state[0:3])
-        no_guid_vel: np.ndarray = copy.deepcopy(self.state[3:6])
-        no_guid_m: float = copy.deepcopy(self.state[-1])
-
-        guid_pos: np.ndarray = copy.deepcopy(self.state[0:3])
-        guid_vel: np.ndarray = copy.deepcopy(self.state[3:6]) + corrective_impulse
-        guid_m: float = copy.deepcopy(self.state[-1])
 
         # propagate to the final timestamp
         # NOTE: could use pykep propagate_lagrangian function (ref: https://esa.github.io/pykep/documentation/core.html#pykep.propagate_lagrangian)
-
-        no_guid_m = self._mass_update(no_guid_m, nominal_impulse)
-        guid_m = self._mass_update(guid_m, total_impulse)
-
-        no_guid_pos, no_guid_vel = np.array(
-            pk.propagate_lagrangian(
-                r0=no_guid_pos,
-                v0=no_guid_vel,
-                tof=self.timestep,
-                mu=self.sun_mu,
-            )
-        )
-        guid_pos, guid_vel = np.array(
-            pk.propagate_lagrangian(
-                r0=guid_pos,
-                v0=guid_vel,
-                tof=self.timestep,
-                mu=self.sun_mu,
-            )
-        )
-
-        # continue propagating until the final state, incorporating the nominal impulse
-        for i in range(self.chosen_timestamp + 1, self.num_timesteps + 1):
-            nominal_impulse = self.nominal_imp[i]
-
-            no_guid_vel += nominal_impulse
-            guid_vel += nominal_impulse
-
-            # final state reached, no need propagation
-            if i == self.num_timesteps:
-                break
-
-            no_guid_pos, no_guid_vel = np.array(
-                pk.propagate_lagrangian(
-                    r0=no_guid_pos,
-                    v0=no_guid_vel,
-                    tof=self.timestep,
-                    mu=self.sun_mu,
-                )
-            )
-            guid_pos, guid_vel = np.array(
-                pk.propagate_lagrangian(
-                    r0=guid_pos,
-                    v0=guid_vel,
-                    tof=self.timestep,
-                    mu=self.sun_mu,
-                )
-            )
-
-            no_guid_m = self._mass_update(no_guid_m, nominal_impulse)
-            guid_m = self._mass_update(guid_m, nominal_impulse)
-
-        # terminal state, reward, done, truncated, info (unused)
-        no_gui_xf: np.ndarray = np.concatenate((no_guid_pos, no_guid_vel, [no_guid_m]))
-        gui_xf: np.ndarray = np.concatenate((guid_pos, guid_vel, [guid_m]))
+        no_gui_xf: np.ndarray = self._propagate(False)
+        gui_xf: np.ndarray = self._propagate(True, corrective_impulse)
         total_reward, reward_effort, reward_control_penalty, reward_dyn = (
             self._reward_function(vmax, corrective_impulse, gui_xf, no_gui_xf)
         )
+
+        # terminal state, reward, done, truncated, info
         info: dict = {
             "reward_effort": reward_effort,
             "reward_control_penalty": reward_control_penalty,
             "reward_dyn": reward_dyn,
             "timestep": self.chosen_timestamp,
             "noise": self.noise,
+            "vmax": vmax,
+            "action": action,
             "corrective_impulse": corrective_impulse,
             "terminal_state": gui_xf,
         }
@@ -333,3 +271,44 @@ class CorrectiveTransferEnvironment(gym.Env):
         roots: np.ndarray = np.roots([1, A, B])
 
         return np.max(roots)
+
+    def _propagate(
+        self, is_guid: bool, corrective_impulse: np.ndarray = [0.0, 0.0, 0.0]
+    ) -> np.ndarray:
+        total_impulse: np.ndarray = self.nominal_imp[self.chosen_timestamp]
+        pos: np.ndarray = copy.deepcopy(self.state[0:3])
+        vel: np.ndarray = copy.deepcopy(self.state[3:6])
+        m: float = copy.deepcopy(self.state[-1])
+
+        if is_guid:
+            vel += corrective_impulse
+            total_impulse += corrective_impulse
+
+        m = self._mass_update(m, total_impulse)
+        pos, vel = np.array(
+            pk.propagate_lagrangian(
+                r0=pos,
+                v0=vel,
+                tof=self.timestep,
+                mu=self.sun_mu,
+            )
+        )
+
+        for i in range(self.chosen_timestamp + 1, self.num_timesteps + 1):
+            nominal_impulse = self.nominal_imp[i]
+            vel += nominal_impulse
+
+            if i == self.num_timesteps:
+                break
+
+            m = self._mass_update(m, nominal_impulse)
+            pos, vel = np.array(
+                pk.propagate_lagrangian(
+                    r0=pos,
+                    v0=vel,
+                    tof=self.timestep,
+                    mu=self.sun_mu,
+                )
+            )
+
+        return np.concatenate((pos, vel, [m]))

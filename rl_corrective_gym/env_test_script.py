@@ -14,6 +14,7 @@ import numpy as np
 import stable_baselines3 as sb3
 from stable_baselines3.common import env_checker
 from stable_baselines3.common.evaluation import evaluate_policy
+import pandas as pd
 
 # TODO: was used in the initial testing for preliminary validation, would like to
 # eventually update the test functions to use the new one
@@ -24,6 +25,18 @@ from rl_corrective_gym.gym_env_setup.corrective_transfer_env import (
     CorrectiveTransferEnvironment,
 )
 from rl_corrective_gym.gym_env_setup.space_env_config import SpaceEnvironmentConfig
+
+
+def test_init() -> CorrectiveTransferEnvironment:
+    # read in json data and initialise env config
+    with open("space_configs/env_config.json") as f:
+        data: dict = json.load(f)
+
+    config: SpaceEnvironmentConfig = SpaceEnvironmentConfig()
+    for k, v in data.items():
+        setattr(config, k, v)
+
+    return CorrectiveTransferEnvironment(config)
 
 
 def test_prop():
@@ -43,6 +56,12 @@ def test_prop():
         np.linalg.norm(state_diff) < 1e-6
     ), "Propagator error exceeds acceptable threshold"
     assert reward == 0, "Error between guided and unguided trajectory"
+
+    # extension for propagate function
+    env: CorrectiveTransferEnvironment = test_init()
+    _final_state: np.ndarray = env._propagate(False)
+
+    assert np.all(final_state == _final_state), "Error in propagator function"
 
     print("PASS")
 
@@ -104,15 +123,7 @@ def test_eval(algo: str):
 
 
 def test_loc():
-    # read in json data and initialise env config
-    with open("space_configs/env_config.json") as f:
-        data: dict = json.load(f)
-
-    config: SpaceEnvironmentConfig = SpaceEnvironmentConfig()
-    for k, v in data.items():
-        setattr(config, k, v)
-
-    env: CorrectiveTransferEnvironment = CorrectiveTransferEnvironment(config)
+    env: CorrectiveTransferEnvironment = test_init()
 
     # test the law of cosine function
     # roots: 6.39, 11.74
@@ -122,15 +133,7 @@ def test_loc():
 
 
 def test_control_input():
-    # read in json data and initialise env config
-    with open("space_configs/env_config.json") as f:
-        data: dict = json.load(f)
-
-    config: SpaceEnvironmentConfig = SpaceEnvironmentConfig()
-    for k, v in data.items():
-        setattr(config, k, v)
-
-    env: CorrectiveTransferEnvironment = CorrectiveTransferEnvironment(config)
+    env: CorrectiveTransferEnvironment = test_init()
 
     # test the control input
     vmax: float = env.max_thrust * env.timestep / env.state[-1]
@@ -139,6 +142,39 @@ def test_control_input():
     assert (
         np.linalg.norm(corrective_impulse + env.nominal_imp[0]) <= vmax
     ), "Control limits exceeded."
+
+
+def test_debug(df_id: int = 1):
+    """
+    For debugging certain scenarios from the plot.
+    - recomputation seems to have slight deviation
+    """
+    df = pd.read_csv("../../SAC-mars-25_08_06_04-53-52/10/data/eval.csv")
+
+    # TEST REWARDS
+    env: CorrectiveTransferEnvironment = test_init()
+    env.chosen_timestamp = df["timestep"][df_id]
+    env.state = env.nominal_traj[env.chosen_timestamp, :] + np.fromstring(
+        df["noise"][df_id].strip("[]"), sep=" "
+    )
+
+    corrective_impulse: np.ndarray = np.fromstring(
+        df["corrective_impulse"][df_id].strip("[]"), sep=" "
+    )
+    nominal_imp: np.ndarray = env.nominal_imp[env.chosen_timestamp]
+    vmax: float = env.max_thrust * env.timestep / env.state[-1]
+    total_mag: float = np.linalg.norm(corrective_impulse + nominal_imp)
+
+    print(vmax - total_mag)  # not matching results; this follow constraints
+    print(vmax)
+
+    # slight difference in the control effort reward
+    placeholder: np.ndarray = np.array([0] * 7)
+    print(env._reward_function(vmax, corrective_impulse, placeholder, placeholder))
+
+    # TEST PROPAGATION
+    terminal_state: np.ndarray = env._propagate(True, corrective_impulse)
+    print(terminal_state)  # minor changes
 
 
 if __name__ == "__main__":
@@ -159,6 +195,7 @@ if __name__ == "__main__":
             "eval",
             "loc",
             "control_input",
+            "debug",
         ],
     )
     args = parser.parse_args()
@@ -175,5 +212,7 @@ if __name__ == "__main__":
         test_loc()
     elif args.task == "control_input":
         test_control_input()
+    elif args.task == "debug":
+        test_debug()
     else:
         test_eval(args.algo)

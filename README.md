@@ -21,6 +21,9 @@ notes:
 - run the container as a background task `docker run -d --gpus all -v ~/cares_rl_logs:/root/cares_rl_logs space-image`, this also mounts the results to the cares_log in the server
 - open the container as an interactive shell `docker exec -it <id> bash`
 
+run as a bg task:
+`docker run -d --gpus all -v ~/cares_rl_logs:/root/cares_rl_logs space-image bash -c "source /opt/conda/etc/profile.d/conda.sh && conda activate  corrective-mars && python run.py train config --data_path ../../rl_corrective_gym/rl_corrective_gym/space_configs"`
+
 # Documentation 
 - replace the parser with custom env config class
 - change the function name for obs space shape
