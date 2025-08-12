@@ -156,13 +156,12 @@ class CorrectiveTransferEnvironment(gym.Env):
         # NOTE: could use pykep propagate_lagrangian function (ref: https://esa.github.io/pykep/documentation/core.html#pykep.propagate_lagrangian)
         no_gui_xf: np.ndarray = self._propagate(False)
         gui_xf: np.ndarray = self._propagate(True, corrective_impulse)
-        total_reward, reward_effort, reward_control_penalty, reward_dyn = (
-            self._reward_function(vmax, corrective_impulse, gui_xf, no_gui_xf)
+        total_reward, reward_control_penalty, reward_dyn = self._reward_function(
+            vmax, corrective_impulse, gui_xf, no_gui_xf
         )
 
         # terminal state, reward, done, truncated, info
         info: dict = {
-            "reward_effort": reward_effort,
             "reward_control_penalty": reward_control_penalty,
             "reward_dyn": reward_dyn,
             "timestep": self.chosen_timestamp,
@@ -170,7 +169,8 @@ class CorrectiveTransferEnvironment(gym.Env):
             "vmax": vmax,
             "action": action,
             "corrective_impulse": corrective_impulse,
-            "terminal_state": gui_xf,
+            "gui_terminal_state": gui_xf,
+            "no_gui_terminal_state": no_gui_xf,
         }
         return gui_xf, total_reward, True, False, info
 
@@ -195,12 +195,12 @@ class CorrectiveTransferEnvironment(gym.Env):
         total_corrective_imp: np.ndarray = nominal_imp + control_imp
 
         # reward/penalty for effort
-        nominal_imp_mag: float = np.linalg.norm(nominal_imp)
-        reward_effort: float = (
-            (nominal_imp_mag - np.linalg.norm(total_corrective_imp))
-            / nominal_imp_mag
-            * self.penalty_scale_effort
-        )
+        # nominal_imp_mag: float = np.linalg.norm(nominal_imp)
+        # reward_effort: float = (
+        #     (nominal_imp_mag - np.linalg.norm(total_corrective_imp))
+        #     / nominal_imp_mag
+        #     * self.penalty_scale_effort
+        # )
 
         # penalty for exceeding the control limits
         # NOTE: with constraints, this should be zero
@@ -216,14 +216,15 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         # NOTE: for now euclidean, can change into weighted norm
         error_no_guid_mag: float = np.linalg.norm(error_no_guid[0:6])
+        error_guid_mag: float = np.linalg.norm(error_guid[0:6])
         reward_dyn = (
-            (error_no_guid_mag - np.linalg.norm(error_guid[0:6]))
+            (error_no_guid_mag - error_guid_mag)
             / error_no_guid_mag
             * self.penalty_scale_dynamics
         )
 
-        total_reward: float = reward_effort + reward_control_penalty + reward_dyn
-        return total_reward, reward_effort, reward_control_penalty, reward_dyn
+        total_reward: float = reward_control_penalty + reward_dyn
+        return total_reward, reward_control_penalty, reward_dyn
 
     def _get_control_input(self, vmax: float, action) -> np.ndarray:
         """
