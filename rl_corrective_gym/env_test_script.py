@@ -149,7 +149,7 @@ def test_debug(df_id: int = 1):
     For debugging certain scenarios from the plot.
     - recomputation seems to have slight deviation
     """
-    df = pd.read_csv("../../SAC-mars-25_08_06_04-53-52/10/data/eval.csv")
+    df = pd.read_csv("../../SAC-mars-25_08_12_05-08-54/10/data/eval.csv")
 
     # TEST REWARDS
     env: CorrectiveTransferEnvironment = test_init()
@@ -157,14 +157,12 @@ def test_debug(df_id: int = 1):
     env.state = env.nominal_traj[env.chosen_timestamp, :] + np.fromstring(
         df["noise"][df_id].strip("[]"), sep=" "
     )
-
     corrective_impulse: np.ndarray = np.fromstring(
         df["corrective_impulse"][df_id].strip("[]"), sep=" "
     )
     nominal_imp: np.ndarray = env.nominal_imp[env.chosen_timestamp]
     vmax: float = env.max_thrust * env.timestep / env.state[-1]
     total_mag: float = np.linalg.norm(corrective_impulse + nominal_imp)
-
     print(vmax - total_mag)  # not matching results; this follow constraints
     print(vmax)
 
@@ -173,8 +171,14 @@ def test_debug(df_id: int = 1):
     print(env._reward_function(vmax, corrective_impulse, placeholder, placeholder))
 
     # TEST PROPAGATION
-    terminal_state: np.ndarray = env._propagate(True, corrective_impulse)
-    print(terminal_state)  # minor changes
+    print(env._propagate(True, corrective_impulse))  # minor changes
+    print(env._propagate(False))
+
+    # TEST FUNCTIONS
+    action: np.ndarray = np.fromstring(df["action"][df_id].strip("[]"), sep=" ")
+    csv_vmax: float = df["vmax"][df_id]
+    print(env.step(action))
+    print(env._get_control_input(csv_vmax, action))
 
 
 if __name__ == "__main__":

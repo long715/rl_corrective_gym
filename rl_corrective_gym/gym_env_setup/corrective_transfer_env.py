@@ -231,7 +231,7 @@ class CorrectiveTransferEnvironment(gym.Env):
         As the mass is unchanged, chosen control input will always be bounded.
         We can find the vmax at a given direction by solving for u in the following:
         || v_norm + u*control_dir_unit|| = vmax
-        ||v||^2 + u^2 + 2u v.i = vmax
+        ||v||^2 + u^2 + 2u v.i = vmax^2
 
         which can be rearraged to a quadratic formula:
         u^2 + Au + B = 0
@@ -276,7 +276,9 @@ class CorrectiveTransferEnvironment(gym.Env):
     def _propagate(
         self, is_guid: bool, corrective_impulse: np.ndarray = [0.0, 0.0, 0.0]
     ) -> np.ndarray:
-        total_impulse: np.ndarray = self.nominal_imp[self.chosen_timestamp]
+        total_impulse: np.ndarray = copy.deepcopy(
+            self.nominal_imp[self.chosen_timestamp]
+        )
         pos: np.ndarray = copy.deepcopy(self.state[0:3])
         vel: np.ndarray = copy.deepcopy(self.state[3:6])
         m: float = copy.deepcopy(self.state[-1])
