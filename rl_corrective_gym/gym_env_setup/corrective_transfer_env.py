@@ -6,6 +6,11 @@ General Notes:
 - Currently doesn't support rendering as it is deemed unnecessary and impacts the computational complexity of the training
 """
 
+import os
+
+current_dir = os.path.dirname(__file__)
+file_dir = os.path.join(current_dir, "..", "nominal_trajectory")
+
 from functools import cached_property
 import random
 import copy
@@ -36,13 +41,13 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         # define required information from SCP data
         self.nominal_traj: np.ndarray = pd.read_csv(
-            f"../../rl_corrective_gym/rl_corrective_gym/nominal_trajectory/{traj_filename}"
+            os.path.join(file_dir, traj_filename)
         ).to_numpy()
 
         self.num_timesteps: int = len(self.nominal_traj) - 1
         self.max_m: float = self.nominal_traj[0, -1]
         self.nominal_imp: np.ndarray = pd.read_csv(
-            f"../../rl_corrective_gym/rl_corrective_gym/nominal_trajectory/{impulse_filename}"
+            os.path.join(file_dir, impulse_filename)
         ).to_numpy()
 
         # task config (doi: 10.1016/j.actaastro.2023.10.018)
@@ -50,7 +55,6 @@ class CorrectiveTransferEnvironment(gym.Env):
         self.timestep: float = (
             (self.tof / self.num_timesteps) * 24 * 60 * 60
         )  # in seconds
-
         # dynamics uncertainties config (in km)
         self.dyn_pos_sd: float = config.dyn_pos_sd
         self.dyn_vel_sd: float = config.dyn_vel_sd
@@ -154,8 +158,8 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         # propagate to the final timestamp
         # NOTE: could use pykep propagate_lagrangian function (ref: https://esa.github.io/pykep/documentation/core.html#pykep.propagate_lagrangian)
-        no_gui_xf: np.ndarray = self._propagate(False)
-        gui_xf: np.ndarray = self._propagate(True, corrective_impulse)
+        no_gui_xf: np.ndarray = self._propagate(False)["terminal_state"]
+        gui_xf: np.ndarray = self._propagate(True, corrective_impulse)["terminal_state"]
         total_reward, reward_control_penalty, reward_dyn = self._reward_function(
             vmax, corrective_impulse, gui_xf, no_gui_xf
         )
@@ -287,6 +291,17 @@ class CorrectiveTransferEnvironment(gym.Env):
             vel += corrective_impulse
             total_impulse += corrective_impulse
 
+        # logging
+        log_pos: np.ndarray = np.append(
+            self.nominal_traj[0 : self.chosen_timestamp, 0:3], [pos], axis=0
+        )
+        log_vel: np.ndarray = np.append(
+            self.nominal_traj[0 : self.chosen_timestamp, 3:6], [vel], axis=0
+        )
+        log_m: np.ndarray = np.append(
+            self.nominal_traj[0 : self.chosen_timestamp, -1], m
+        )
+
         m = self._mass_update(m, total_impulse)
         pos, vel = np.array(
             pk.propagate_lagrangian(
@@ -301,6 +316,10 @@ class CorrectiveTransferEnvironment(gym.Env):
             nominal_impulse = self.nominal_imp[i]
             vel += nominal_impulse
 
+            log_pos = np.append(log_pos, [pos], axis=0)
+            log_vel = np.append(log_vel, [vel], axis=0)
+            log_m = np.append(log_m, m)
+
             if i == self.num_timesteps:
                 break
 
@@ -314,4 +333,10 @@ class CorrectiveTransferEnvironment(gym.Env):
                 )
             )
 
-        return np.concatenate((pos, vel, [m]))
+        # return a dictionary of terminal state and optional info
+        return {
+            "terminal_state": np.concatenate((pos, vel, [m])),
+            "log_pos": log_pos,
+            "log_vel": log_vel,
+            "log_m": log_m,
+        }
