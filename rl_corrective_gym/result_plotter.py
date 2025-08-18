@@ -22,7 +22,7 @@ from rl_corrective_gym.gym_env_setup.corrective_transfer_env import (
 )
 
 df = pd.read_csv(
-    "../../SAC-mars-25_08_06_04-53-52/10/data/eval.csv",
+    "../../SAC-mars-25_08_13_04-03-52/10/data/eval.csv",
     on_bad_lines="skip",
     engine="python",
 )
@@ -127,11 +127,18 @@ def plot_trajectory():
             df["corrective_impulse"][i].strip("[]"), sep=" "
         )
 
-        gui_traj: np.ndarray = env._propagate(True, corrective_impulse)["log_pos"]
-        nogui_traj: np.ndarray = env._propagate(False)["log_pos"]
-        ax.plot(gui_traj[:, 0], gui_traj[:, 1], gui_traj[:, 2], "r")
-        ax.plot(nogui_traj[:, 0], nogui_traj[:, 1], nogui_traj[:, 2], "g")
-        break
+        env._init_logs()
+        env._propagate(True, corrective_impulse)
+        env._propagate(False)
+        ax.plot(
+            env.gui_log_pos[:, 0], env.gui_log_pos[:, 1], env.gui_log_pos[:, 2], "r"
+        )
+        ax.plot(
+            env.nogui_log_pos[:, 0],
+            env.nogui_log_pos[:, 1],
+            env.nogui_log_pos[:, 2],
+            "g",
+        )
 
     plt.show()
 

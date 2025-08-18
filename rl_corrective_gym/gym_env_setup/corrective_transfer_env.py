@@ -1,9 +1,6 @@
 """
 Author: Lee Violet Ong
-Date: 09/07/25
-
-General Notes:
-- Currently doesn't support rendering as it is deemed unnecessary and impacts the computational complexity of the training
+Date: 18/08/25
 """
 
 import os
@@ -14,12 +11,15 @@ file_dir = os.path.join(current_dir, "..", "nominal_trajectory")
 from functools import cached_property
 import random
 import copy
+import io
 
 import gymnasium as gym
 from gymnasium import spaces
 import pandas as pd
 import numpy as np
 import pykep as pk
+import matplotlib.pyplot as plt
+from PIL import Image
 
 from rl_corrective_gym.gym_env_setup.space_env_config import SpaceEnvironmentConfig
 
@@ -91,6 +91,15 @@ class CorrectiveTransferEnvironment(gym.Env):
         self.chosen_timestamp: int = 0
         self.noise: np.ndarray = np.array([0] * 4)
 
+        # logging purposes
+        self.gui_log_pos: np.ndarray = np.array([])
+        self.gui_log_vel: np.ndarray = np.array([])
+        self.gui_log_m: np.ndarray = np.array([])
+
+        self.nogui_log_pos: np.ndarray = np.array([])
+        self.nogui_log_vel: np.ndarray = np.array([])
+        self.nogui_log_m: np.ndarray = np.array([])
+
     @cached_property
     def max_action_value(self) -> float:
         return self.action_space.high[0]
@@ -122,7 +131,40 @@ class CorrectiveTransferEnvironment(gym.Env):
         self.action_space.seed(seed)
 
     def grab_frame(self, height: int = 240, width: int = 300) -> np.ndarray:
-        return np.ndarray([])
+        """
+        Frame refers to the plot of the desired trajectory as well as the current
+        guid and noguid trajectories.
+
+        Called for collection of state images in the record class. Called twice:
+        - after reset (shows the chosen state)
+        - after step (show the whole propagation results)
+        """
+        dpi: int = 100  # dots per inches
+        plt.figure(figsize=(width / dpi, height / dpi), dpi=dpi)
+        ax = plt.axes(projection="3d")
+
+        ax.plot(
+            self.nominal_traj[:, 0], self.nominal_traj[:, 1], self.nominal_traj[:, 2]
+        )
+        ax.plot(
+            self.gui_log_pos[:, 0], self.gui_log_pos[:, 1], self.gui_log_pos[:, 2], "r"
+        )
+        ax.plot(
+            self.nogui_log_pos[:, 0],
+            self.nogui_log_pos[:, 1],
+            self.nogui_log_pos[:, 2],
+            "g",
+        )
+
+        # convert the plot into numpy
+        buf: io.BytesIO = io.BytesIO()
+        plt.savefig(buf, format="png", dpi=dpi)
+        buf.seek(0)
+
+        frame: np.ndarray = np.array(Image.open(buf))
+        buf.close()
+
+        return frame
 
     def get_overlay_info(self) -> dict:
         return {}
@@ -133,6 +175,9 @@ class CorrectiveTransferEnvironment(gym.Env):
         # for now, randomly choose the perturbed state with uniform probability
         self.chosen_timestamp = random.randint(0, self.num_timesteps - 1)
         chosen_state: np.ndarray = self.nominal_traj[self.chosen_timestamp, :]
+
+        # reset logging
+        self._init_logs()
 
         # covariance matrix set up
         pos_var: float = np.power(self.dyn_pos_sd, 2)
@@ -158,8 +203,8 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         # propagate to the final timestamp
         # NOTE: could use pykep propagate_lagrangian function (ref: https://esa.github.io/pykep/documentation/core.html#pykep.propagate_lagrangian)
-        no_gui_xf: np.ndarray = self._propagate(False)["terminal_state"]
-        gui_xf: np.ndarray = self._propagate(True, corrective_impulse)["terminal_state"]
+        no_gui_xf: np.ndarray = self._propagate(False)
+        gui_xf: np.ndarray = self._propagate(True, corrective_impulse)
         total_reward, reward_control_penalty, reward_dyn = self._reward_function(
             vmax, corrective_impulse, gui_xf, no_gui_xf
         )
@@ -292,15 +337,7 @@ class CorrectiveTransferEnvironment(gym.Env):
             total_impulse += corrective_impulse
 
         # logging
-        log_pos: np.ndarray = np.append(
-            self.nominal_traj[0 : self.chosen_timestamp, 0:3], [pos], axis=0
-        )
-        log_vel: np.ndarray = np.append(
-            self.nominal_traj[0 : self.chosen_timestamp, 3:6], [vel], axis=0
-        )
-        log_m: np.ndarray = np.append(
-            self.nominal_traj[0 : self.chosen_timestamp, -1], m
-        )
+        self._update_logs(is_guid, pos, vel, m)
 
         m = self._mass_update(m, total_impulse)
         pos, vel = np.array(
@@ -316,9 +353,7 @@ class CorrectiveTransferEnvironment(gym.Env):
             nominal_impulse = self.nominal_imp[i]
             vel += nominal_impulse
 
-            log_pos = np.append(log_pos, [pos], axis=0)
-            log_vel = np.append(log_vel, [vel], axis=0)
-            log_m = np.append(log_m, m)
+            self._update_logs(is_guid, pos, vel, m)
 
             if i == self.num_timesteps:
                 break
@@ -334,9 +369,24 @@ class CorrectiveTransferEnvironment(gym.Env):
             )
 
         # return a dictionary of terminal state and optional info
-        return {
-            "terminal_state": np.concatenate((pos, vel, [m])),
-            "log_pos": log_pos,
-            "log_vel": log_vel,
-            "log_m": log_m,
-        }
+        return np.concatenate((pos, vel, [m]))
+
+    def _update_logs(self, is_guid: bool, pos: np.ndarray, vel: np.ndarray, m: float):
+
+        if is_guid:
+            self.gui_log_pos = np.append(self.gui_log_pos, [pos], axis=0)
+            self.gui_log_vel = np.append(self.gui_log_vel, [vel], axis=0)
+            self.gui_log_m = np.append(self.gui_log_m, m)
+        else:
+            self.nogui_log_pos = np.append(self.nogui_log_pos, [pos], axis=0)
+            self.nogui_log_vel = np.append(self.nogui_log_vel, [vel], axis=0)
+            self.nogui_log_m = np.append(self.nogui_log_m, m)
+
+    def _init_logs(self):
+        self.gui_log_pos = self.nominal_traj[0 : self.chosen_timestamp, 0:3]
+        self.gui_log_vel = self.nominal_traj[0 : self.chosen_timestamp, 3:6]
+        self.gui_log_m = self.nominal_traj[0 : self.chosen_timestamp, -1]
+
+        self.nogui_log_pos = self.nominal_traj[0 : self.chosen_timestamp, 0:3]
+        self.nogui_log_vel = self.nominal_traj[0 : self.chosen_timestamp, 3:6]
+        self.nogui_log_m = self.nominal_traj[0 : self.chosen_timestamp, -1]
