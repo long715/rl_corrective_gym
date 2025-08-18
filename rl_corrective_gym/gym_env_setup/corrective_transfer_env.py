@@ -258,7 +258,7 @@ class CorrectiveTransferEnvironment(gym.Env):
         if control_diff < 0:
             reward_control_penalty = (control_diff / vmax) * self.penalty_scale_control
 
-        # reward/penalty for dynamics
+        # =============== DYNAMICS REWARD/PENALTY ==================
         nom_rv_final: np.ndarray = self.nominal_traj[-1, :]
         error_no_guid: np.ndarray = no_guid_xf - nom_rv_final
         error_guid: np.ndarray = guid_xf - nom_rv_final
@@ -266,11 +266,7 @@ class CorrectiveTransferEnvironment(gym.Env):
         # NOTE: for now euclidean, can change into weighted norm
         error_no_guid_mag: float = np.linalg.norm(error_no_guid[0:6])
         error_guid_mag: float = np.linalg.norm(error_guid[0:6])
-        reward_dyn = (
-            (error_no_guid_mag - error_guid_mag)
-            / error_no_guid_mag
-            * self.penalty_scale_dynamics
-        )
+        reward_dyn = error_guid_mag / error_no_guid_mag * self.penalty_scale_dynamics
 
         total_reward: float = reward_control_penalty + reward_dyn
         return total_reward, reward_control_penalty, reward_dyn
