@@ -15,6 +15,7 @@ import stable_baselines3 as sb3
 from stable_baselines3.common import env_checker
 from stable_baselines3.common.evaluation import evaluate_policy
 import pandas as pd
+import matplotlib.pyplot as plt
 
 # TODO: was used in the initial testing for preliminary validation, would like to
 # eventually update the test functions to use the new one
@@ -144,12 +145,12 @@ def test_control_input():
     ), "Control limits exceeded."
 
 
-def test_debug(df_id: int = 1):
+def test_debug(df_id: int = 15):
     """
     For debugging certain scenarios from the plot.
     - recomputation seems to have slight deviation
     """
-    df = pd.read_csv("../../SAC-mars-25_08_12_05-08-54/10/data/eval.csv")
+    df = pd.read_csv("../../SAC-mars-25_08_13_04-03-52/10/data/eval.csv")
 
     # TEST REWARDS
     env: CorrectiveTransferEnvironment = test_init()
@@ -178,7 +179,45 @@ def test_debug(df_id: int = 1):
     action: np.ndarray = np.fromstring(df["action"][df_id].strip("[]"), sep=" ")
     csv_vmax: float = df["vmax"][df_id]
     print(env.step(action))
-    print(env._get_control_input(csv_vmax, action))
+    print(csv_vmax - np.linalg.norm(env._get_control_input(csv_vmax, action)))
+
+
+def test_deviations():
+    # single sample
+    env: CorrectiveTransferEnvironment = test_init()
+    env.reset()
+    action = env.sample_action()
+    _, _, _, _, info = env.step(action)
+
+    # plot the deviations
+    nom_terminal = env.nominal_traj[-1]
+    ngui_terminal = info["no_gui_terminal_state"]
+    gui_terminal = info["gui_terminal_state"]
+
+    print(
+        np.linalg.norm((ngui_terminal - nom_terminal)[0:3]),
+        np.linalg.norm((ngui_terminal - nom_terminal)[3:6]),
+    )
+
+    plt.figure()
+    plt.plot(
+        np.linalg.norm(ngui_terminal[0:3] - nom_terminal[0:3]),
+        np.linalg.norm(ngui_terminal[3:6] - nom_terminal[3:6]),
+        "rx",
+        label="ngui",
+    )
+    plt.plot(
+        np.linalg.norm(gui_terminal[0:3] - nom_terminal[0:3]),
+        np.linalg.norm(gui_terminal[3:6] - nom_terminal[3:6]),
+        "bx",
+        label="gui",
+    )
+
+    plt.xlabel("Position magnitude error")
+    plt.ylabel("Velocity magnitude error")
+    plt.legend()
+    print(env.noise)
+    plt.show()
 
 
 if __name__ == "__main__":
@@ -200,6 +239,7 @@ if __name__ == "__main__":
             "loc",
             "control_input",
             "debug",
+            "dev",
         ],
     )
     args = parser.parse_args()
@@ -218,5 +258,7 @@ if __name__ == "__main__":
         test_control_input()
     elif args.task == "debug":
         test_debug()
+    elif args.task == "dev":
+        test_deviations()
     else:
         test_eval(args.algo)

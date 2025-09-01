@@ -22,7 +22,7 @@ from rl_corrective_gym.gym_env_setup.corrective_transfer_env import (
 )
 
 df = pd.read_csv(
-    "../../SAC-mars-25_08_13_04-03-52/10/data/eval.csv",
+    "../../SAC-mars-25_08_27_16-19-46/10/data/eval.csv",
     on_bad_lines="skip",
     engine="python",
 )
@@ -41,16 +41,16 @@ def plot_rewards():
     # unsure where the source of error is, seems to be giving a slightly diff mass
     plt.subplot(2, 2, 2)
     plt.title("Reward Control Penalty")
-    plt.xlabel("Iteration")
+    plt.xlabel("Episode")
     plt.ylabel("Reward")
-    df_rew_control_penalty: pd.Series = df["reward_control_penalty"]
+    df_rew_control_penalty: pd.Series = df["reward_control_penalty"][0:1000]
     plt.plot(range(len(df_rew_control_penalty)), df_rew_control_penalty, ".")
 
-    plt.subplot(2, 2, 3)
+    plt.subplot(2, 2, 2)
     plt.title("Reward Dynamics")
-    plt.xlabel("Iteration")
-    plt.ylabel("Reward")
-    df_rew_dyn: pd.Series = df["reward_dyn"]
+    plt.xlabel("Episode")
+    # plt.ylabel("Reward")
+    df_rew_dyn: pd.Series = df["reward_dyn"][0:1000]
     plt.plot(range(len(df_rew_dyn)), df_rew_dyn, ".")
 
     plt.show()
@@ -65,33 +65,53 @@ def plot_terminal():
     nominal_terminal_state: np.ndarray = pd.read_csv(
         "nominal_trajectory/SCP_impulsive_traj.csv"
     ).to_numpy()[-1, :]
-    nominal_pos: float = np.linalg.norm(nominal_terminal_state[0:3])
-    nominal_vel: float = np.linalg.norm(nominal_terminal_state[3:6])
 
     # eval terminal state
     state_pos: np.ndarray = np.array([])
     state_vel: np.ndarray = np.array([])
 
-    for state in df["terminal_state"]:
+    for state in df["gui_terminal_state"][-1000:].to_numpy():
         # ignore the mass for now
         state_numpy: np.ndarray = np.fromstring(state.strip("[]"), sep=" ")
-        pos_mag: float = np.linalg.norm(state_numpy[0:3])
-        vel_mag: float = np.linalg.norm(state_numpy[3:6])
+        print(
+            f"Guidance: {np.linalg.norm(state_numpy[0:6] - nominal_terminal_state[0:6])}"
+        )
 
-        state_pos = np.append(state_pos, pos_mag)
-        state_vel = np.append(state_vel, vel_mag)
-
-        if pos_mag == nominal_pos and vel_mag == nominal_vel:
-            print(state_numpy[6])
+        state_pos = np.append(
+            state_pos, np.linalg.norm(state_numpy[0:3] - nominal_terminal_state[0:3])
+        )
+        state_vel = np.append(
+            state_vel, np.linalg.norm(state_numpy[3:6] - nominal_terminal_state[3:6])
+        )
 
     plt.figure()
     plt.title("Terminal State Deviation")
     plt.xlabel("Position magnitude")
     plt.ylabel("Velocity magnitude")
 
-    plt.plot(nominal_pos, nominal_vel, "k+")
-    plt.plot(state_pos[0:40], state_vel[0:40], "rx")
-    plt.plot(state_pos[40:], state_vel[40:], "bx")
+    # plt.plot(nominal_pos, nominal_vel, "k+")
+    plt.plot(state_pos, state_vel, "bx", label="guid")
+
+    state_pos: np.ndarray = np.array([])
+    state_vel: np.ndarray = np.array([])
+
+    for state in df["no_gui_terminal_state"][-1000:].to_numpy():
+        # ignore the mass for now
+        state_numpy: np.ndarray = np.fromstring(state.strip("[]"), sep=" ")
+        print(
+            f"No Guidance: {np.linalg.norm(state_numpy[0:6] - nominal_terminal_state[0:6])}"
+        )
+
+        state_pos = np.append(
+            state_pos, np.linalg.norm(state_numpy[0:3] - nominal_terminal_state[0:3])
+        )
+        state_vel = np.append(
+            state_vel, np.linalg.norm(state_numpy[3:6] - nominal_terminal_state[3:6])
+        )
+
+    plt.plot(state_pos, state_vel, "rx", label="no_guid")
+
+    plt.legend()
 
     plt.show()
 
@@ -118,14 +138,16 @@ def plot_trajectory():
     ax.plot(env.nominal_traj[:, 0], env.nominal_traj[:, 1], env.nominal_traj[:, 2])
 
     # need to manually do reset setup ie. state, chosen_timestep
-    for i in range(len(df)):
-        env.chosen_timestamp = df["timestep"][i]
-        env.noise = np.fromstring(df["noise"][i].strip("[]"), sep=" ")
+    sum = 0
+    for i in range(1, 1001):
+        env.chosen_timestamp = int(df["timestep"].iloc[-i])
+        env.noise = np.fromstring(df["noise"].iloc[-i].strip("[]"), sep=" ")
         env.state = env.nominal_traj[env.chosen_timestamp] + env.noise
 
         corrective_impulse: np.ndarray = np.fromstring(
-            df["corrective_impulse"][i].strip("[]"), sep=" "
+            df["corrective_impulse"].iloc[-i].strip("[]"), sep=" "
         )
+        sum += np.linalg.norm(corrective_impulse)
 
         env._init_logs()
         env._propagate(True, corrective_impulse)
@@ -143,6 +165,67 @@ def plot_trajectory():
     plt.show()
 
 
+def plot_loss():
+    plt.figure()
+
+    critic_loss_one = df["critic_loss_total"][1000:]
+
+    plt.plot(range(len(critic_loss_one)), critic_loss_one)
+    plt.xlabel("Steps")
+    plt.ylabel("Loss")
+    plt.title("Critic Loss")
+
+    plt.show()
+
+
+def bar_control():
+    """
+    Aims to show the proportion of nominal to corrective in vmax, this is for
+    the initial analysis for feasibility.
+    """
+    nominal_imp: np.ndarray = pd.read_csv("nominal_trajectory/SCP_dV.csv").to_numpy()
+    nom_prop: np.ndarray = np.array([])
+    corr_prop: np.ndarray = np.array([])
+
+    for i in range(1000):
+        chosen_timestamp: int = df["timestep"][i]
+        vmax: int = df["vmax"][i]
+
+        corrective_imp: np.ndarray = np.fromstring(
+            df["corrective_impulse"][i].strip("[]"), sep=" "
+        )
+        n_imp: np.ndarray = nominal_imp[chosen_timestamp, :]
+
+        total_imp: np.ndarray = corrective_imp + n_imp
+        total_unit: np.ndarray = total_imp / np.linalg.norm(total_imp)
+
+        n_imp_mag = np.dot(n_imp, total_unit)
+        corrective_impulse_mag = np.dot(corrective_imp, total_unit)
+
+        if n_imp_mag < 0:
+            corrective_impulse_mag += n_imp_mag
+            n_imp_mag = 0
+        elif corrective_impulse_mag < 0:
+            n_imp_mag += corrective_impulse_mag
+            corrective_impulse_mag = 0
+
+        nom_prop = np.append(nom_prop, n_imp_mag / vmax)
+        corr_prop = np.append(corr_prop, corrective_impulse_mag / vmax)
+
+    plt.figure()
+    x = range(100)
+    vmax_prop = np.array([1] * 100)
+
+    plt.bar(x, corr_prop[900:], alpha=0.8, color="r")
+    plt.bar(x, nom_prop[900:], bottom=corr_prop[900:], alpha=0.6, color="b")
+    plt.bar(x, vmax_prop, alpha=0.3, color="g")
+
+    plt.xlabel("Episodes")
+    plt.ylabel("Proportion")
+    plt.legend(["Corrective", "Nominal"])
+    plt.show()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -150,7 +233,7 @@ if __name__ == "__main__":
         required=False,
         type=str,
         default="terminal",
-        choices=["reward", "terminal", "control", "trajectory"],
+        choices=["reward", "terminal", "control", "trajectory", "loss", "bar_prop"],
     )
 
     args = parser.parse_args()
@@ -162,3 +245,7 @@ if __name__ == "__main__":
         plot_control()
     elif args.plot == "trajectory":
         plot_trajectory()
+    elif args.plot == "loss":
+        plot_loss()
+    elif args.plot == "bar_prop":
+        bar_control()
