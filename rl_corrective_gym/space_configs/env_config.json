@@ -1,11 +1,12 @@
 {
-    "gym": "space",
-    "task": "mars", 
+  "gym": "space",
+  "task": "mars",
 
-    "traj_filename": "SCP_impulsive_traj.csv",
-    "impulse_filename": "SCP_dV.csv",
+  "traj_filename": "SCP_impulsive_traj.csv",
+  "impulse_filename": "SCP_dV.csv",
+  "single_run": 0,
 
-    "tof": 348.79,
-    "max_thrust": 0.5,
-    "exhaust_vel": 19.6133
+  "tof": 348.79,
+  "max_thrust": 0.0005,
+  "exhaust_vel": 19.6133
 }

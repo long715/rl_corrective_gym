@@ -22,7 +22,7 @@ from rl_corrective_gym.gym_env_setup.corrective_transfer_env import (
 )
 
 df = pd.read_csv(
-    "../../SAC-mars-25_08_27_16-19-46/10/data/eval.csv",
+    "../../SAC-mars-25_09_15_11-53-46/10/data/eval.csv",
     on_bad_lines="skip",
     engine="python",
 )
@@ -46,7 +46,7 @@ def plot_rewards():
     df_rew_control_penalty: pd.Series = df["reward_control_penalty"][0:1000]
     plt.plot(range(len(df_rew_control_penalty)), df_rew_control_penalty, ".")
 
-    plt.subplot(2, 2, 2)
+    plt.subplot(2, 2, 3)
     plt.title("Reward Dynamics")
     plt.xlabel("Episode")
     # plt.ylabel("Reward")

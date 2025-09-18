@@ -3,10 +3,11 @@ Author: Lee Violet Ong
 Date: 18/08/25
 """
 
+# Directory setup
 import os
+import rl_corrective_gym
 
-current_dir = os.path.dirname(__file__)
-file_dir = os.path.join(current_dir, "..", "nominal_trajectory")
+file_dir = os.path.dirname(rl_corrective_gym.nominal_trajectory.__file__)
 
 from functools import cached_property
 import random
@@ -20,8 +21,14 @@ import numpy as np
 import pykep as pk
 import matplotlib.pyplot as plt
 from PIL import Image
+from daceypy import DA, array
 
 from rl_corrective_gym.gym_env_setup.space_env_config import SpaceEnvironmentConfig
+from rl_corrective_gym.RK78 import RK78
+
+# CONSTANTS
+AU = 1.495978707e11
+DAY = 86400
 
 
 class CorrectiveTransferEnvironment(gym.Env):
@@ -33,6 +40,7 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         traj_filename: str = config.traj_filename
         impulse_filename: str = config.impulse_filename
+        self.single_run: bool = config.single_run
 
         # define universal parameters
         self.sun_mu: float = 1.32712440018e11
@@ -40,30 +48,32 @@ class CorrectiveTransferEnvironment(gym.Env):
         self.ve: float = np.sqrt(self.sun_mu / self.au)  # orbital velocity of earth
 
         # define required information from SCP data
+        # [pos (km), vel (km/s), m (kg)]
         self.nominal_traj: np.ndarray = pd.read_csv(
             os.path.join(file_dir, traj_filename)
         ).to_numpy()
 
-        self.num_timesteps: int = len(self.nominal_traj) - 1
-        self.max_m: float = self.nominal_traj[0, -1]
+        self.num_timesteps: int = len(self.nominal_traj) - 1  # no-dim
+        self.max_m: float = self.nominal_traj[0, -1]  # kg
+
+        # applied impulse [vel (km/s)]
         self.nominal_imp: np.ndarray = pd.read_csv(
             os.path.join(file_dir, impulse_filename)
         ).to_numpy()
 
         # task config (doi: 10.1016/j.actaastro.2023.10.018)
         self.tof: float = config.tof  # in days
-        self.timestep: float = (
-            (self.tof / self.num_timesteps) * 24 * 60 * 60
-        )  # in seconds
-        # dynamics uncertainties config (in km)
+        self.timestep: float = self.tof / self.num_timesteps * DAY  # in seconds
+
+        # dynamics uncertainties config (in km, km/s)
         self.dyn_pos_sd: float = config.dyn_pos_sd
         self.dyn_vel_sd: float = config.dyn_vel_sd
 
         # thruster config
-        self.max_thrust: float = config.max_thrust
-        self.exhaust_vel: float = config.exhaust_vel
+        self.max_thrust: float = config.max_thrust  # N, kg km/s^2
+        self.exhaust_vel: float = config.exhaust_vel  # km/s
 
-        # reward
+        # reward (no-dim)
         self.penalty_scale_control: float = 100.0
         self.penalty_scale_dynamics: float = 10.0
         self.penalty_scale_effort: float = 10.0
@@ -71,7 +81,7 @@ class CorrectiveTransferEnvironment(gym.Env):
         # define the spaces ie. all possible range of obs and action
         # [rx, ry, rz, vx, vy, vz, m]
         earth_constraints: np.ndarray = np.array(
-            [self.au, self.au, self.au, self.ve, self.ve, self.ve]
+            [AU, AU, AU, self.ve, self.ve, self.ve]
         )
         self.observation_space: spaces.Box = spaces.Box(
             low=np.concatenate((-2 * earth_constraints, [0.0])),
@@ -100,6 +110,10 @@ class CorrectiveTransferEnvironment(gym.Env):
         self.nogui_log_vel: np.ndarray = np.array([])
         self.nogui_log_m: np.ndarray = np.array([])
 
+        # initialise state here since reset will just init logs
+        if self.single_run:
+            self._init_state()
+
     @cached_property
     def max_action_value(self) -> float:
         return self.action_space.high[0]
@@ -126,9 +140,12 @@ class CorrectiveTransferEnvironment(gym.Env):
         return self.action_space.sample()
 
     def set_seed(self, seed: int) -> None:
-        _ = self.reset(seed=seed)
+        super().reset(seed=seed)
         # Note issues: https://github.com/rail-berkeley/softlearning/issues/75
         self.action_space.seed(seed)
+        # important for timestep replicability
+        random.seed(seed)
+        np.random.seed(seed)
 
     def grab_frame(self, height: int = 240, width: int = 300) -> np.ndarray:
         """
@@ -140,7 +157,7 @@ class CorrectiveTransferEnvironment(gym.Env):
         - after step (show the whole propagation results)
         """
         dpi: int = 100  # dots per inches
-        plt.figure(figsize=(width / dpi, height / dpi), dpi=dpi)
+        fig = plt.figure(figsize=(width / dpi, height / dpi), dpi=dpi)
         ax = plt.axes(projection="3d")
 
         ax.plot(
@@ -156,49 +173,36 @@ class CorrectiveTransferEnvironment(gym.Env):
             "g",
         )
 
-        # convert the plot into numpy
+        # # convert the plot into numpy
         buf: io.BytesIO = io.BytesIO()
         plt.savefig(buf, format="png", dpi=dpi)
         buf.seek(0)
 
-        frame: np.ndarray = np.array(Image.open(buf))
+        frame: np.ndarray = np.array(Image.open(buf).convert("RGB"))
         buf.close()
+        fig.clear()
 
         return frame
 
     def get_overlay_info(self) -> dict:
         return {}
 
-    def reset(self, *, seed=None, options=None) -> np.ndarray:
-        super().reset(seed=seed, options=options)
-
-        # for now, randomly choose the perturbed state with uniform probability
-        self.chosen_timestamp = random.randint(0, self.num_timesteps - 1)
-        chosen_state: np.ndarray = self.nominal_traj[self.chosen_timestamp, :]
-
-        # reset logging
+    def reset(self, *, training: bool = True) -> np.ndarray:
+        super().reset()
         self._init_logs()
 
-        # covariance matrix set up
-        pos_var: float = np.power(self.dyn_pos_sd, 2)
-        vel_var: float = np.power(self.dyn_vel_sd, 2)
-        cov: np.ndarray = np.diag(
-            [pos_var, pos_var, pos_var, vel_var, vel_var, vel_var]
-        )
-        mean: np.ndarray = np.array([0] * 6)
+        if not self.single_run:
+            self._init_state()
 
-        # choose the gaussian noise for the chosen state
-        self.noise = np.concatenate(
-            (np.random.multivariate_normal(mean, cov), np.array([0]))
-        )
-        self.state = chosen_state + self.noise
-
-        # obs
         return self.state
 
     def step(self, action) -> tuple:
         # compute the vmax based on the mass before impulse
-        vmax: float = self.max_thrust * self.timestep / self.state[-1]
+        m0: float = self.state[-1]  # kg
+        vmax: float = self.exhaust_vel * np.log(
+            (m0 * self.exhaust_vel)
+            / (m0 * self.exhaust_vel - self.max_thrust * self.timestep)
+        )  # km/s
         corrective_impulse: np.ndarray = self._get_control_input(vmax, action)
 
         # propagate to the final timestamp
@@ -228,8 +232,8 @@ class CorrectiveTransferEnvironment(gym.Env):
         Implements the Tsiolkovsky Rocket Equation for the mass update.
 
         Arguments:
-        - m0: the current mass at t before impulse
-        - impulse: the total impulse vector at t
+        - m0: the current mass at t before impulse (kg)
+        - impulse: the total impulse vector at t (km/s)
         """
         return m0 * np.exp(-np.linalg.norm(impulse) / self.exhaust_vel)
 
@@ -244,12 +248,12 @@ class CorrectiveTransferEnvironment(gym.Env):
         total_corrective_imp: np.ndarray = nominal_imp + control_imp
 
         # reward/penalty for effort
-        # nominal_imp_mag: float = np.linalg.norm(nominal_imp)
-        # reward_effort: float = (
-        #     (nominal_imp_mag - np.linalg.norm(total_corrective_imp))
-        #     / nominal_imp_mag
-        #     * self.penalty_scale_effort
-        # )
+        nominal_imp_mag: float = np.linalg.norm(nominal_imp)
+        reward_effort: float = (
+            (nominal_imp_mag - np.linalg.norm(total_corrective_imp))
+            / nominal_imp_mag
+            * self.penalty_scale_effort
+        )
 
         # penalty for exceeding the control limits
         # NOTE: with constraints, this should be zero
@@ -293,7 +297,8 @@ class CorrectiveTransferEnvironment(gym.Env):
         B: float = np.power(np.linalg.norm(nominal_imp), 2) - np.power(vmax, 2)
         roots: np.ndarray = np.roots([1, A, B])
 
-        corrective_mag = np.max(roots)
+        # control max is 10 m/s
+        corrective_mag = min(np.max(roots), 0.01)
         return corrective_mag * (1 + action[0]) / 2 * action_unit
 
     def _law_of_cosine(self, theta: float, a: float, c: float):
@@ -323,10 +328,10 @@ class CorrectiveTransferEnvironment(gym.Env):
     ) -> np.ndarray:
         total_impulse: np.ndarray = copy.deepcopy(
             self.nominal_imp[self.chosen_timestamp]
-        )
-        pos: np.ndarray = copy.deepcopy(self.state[0:3])
-        vel: np.ndarray = copy.deepcopy(self.state[3:6])
-        m: float = copy.deepcopy(self.state[-1])
+        )  # km/s
+        pos: np.ndarray = copy.deepcopy(self.state[0:3])  # km
+        vel: np.ndarray = copy.deepcopy(self.state[3:6])  # km/s
+        m: float = copy.deepcopy(self.state[-1])  # kg
 
         if is_guid:
             vel += corrective_impulse
@@ -364,7 +369,7 @@ class CorrectiveTransferEnvironment(gym.Env):
                 )
             )
 
-        # return a dictionary of terminal state and optional info
+        # return a dictionary of terminal state
         return np.concatenate((pos, vel, [m]))
 
     def _update_logs(self, is_guid: bool, pos: np.ndarray, vel: np.ndarray, m: float):
@@ -386,3 +391,50 @@ class CorrectiveTransferEnvironment(gym.Env):
         self.nogui_log_pos = self.nominal_traj[0 : self.chosen_timestamp, 0:3]
         self.nogui_log_vel = self.nominal_traj[0 : self.chosen_timestamp, 3:6]
         self.nogui_log_m = self.nominal_traj[0 : self.chosen_timestamp, -1]
+
+    def _init_state(self):
+        # for now, randomly choose the perturbed state with uniform probability
+        self.chosen_timestamp = random.randint(0, self.num_timesteps - 1)
+        chosen_state: np.ndarray = self.nominal_traj[self.chosen_timestamp, :]
+
+        # covariance matrix set up
+        pos_var: float = self.dyn_pos_sd**2
+        vel_var: float = self.dyn_vel_sd**2
+        cov: np.ndarray = np.diag(
+            [pos_var, pos_var, pos_var, vel_var, vel_var, vel_var]
+        )
+        mean: np.ndarray = np.array([0] * 6)
+
+        # choose the gaussian noise for the chosen state
+        self.noise = np.concatenate(
+            (np.random.multivariate_normal(mean, cov), np.array([0]))
+        )
+        self.state = chosen_state + self.noise
+
+    def _dynamics(self, t, x: array, params) -> array:
+        # Keplerian 2-body equations of motions
+        # Makes use of daceypy array struct
+        pos: array = x[0:3]
+        vel: array = x[3:6]
+
+        pos_norm: float = pos.vnorm()
+        v_dot: array = -(self.sun_mu / pos_norm**3) * pos
+
+        return vel.concat(v_dot)
+
+    def _stm_pert(self):
+        """
+        This function utilises DA to obtain the STM (first-order).
+        """
+        DA.init(1, 6)
+
+        tf: float = (self.num_timesteps - self.chosen_timestamp) * self.timestep
+        # define the DA variables - in this case, the variables
+        # are the EOM variables themselves
+
+        x0: array = array(self.state[0:6] + [DA(1), DA(2), DA(3), DA(4), DA(5), DA(6)])
+
+        with DA.cache_manager():
+            xf_DA = RK78(x0, 0.0, tf, self._dynamics, None)
+
+        return xf_DA.linear()

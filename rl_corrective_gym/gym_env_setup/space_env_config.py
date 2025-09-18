@@ -1,14 +1,13 @@
-from util.configurations import GymEnvironmentConfig
-
-
-class SpaceEnvironmentConfig(GymEnvironmentConfig):
+class SpaceEnvironmentConfig:
     traj_filename: str
     impulse_filename: str
 
-    tof: float
-    max_thrust: float
-    exhaust_vel: float
+    # defines if we want to reset to the same timestep
+    single_run: bool
 
-    dyn_pos_sd: float = 1.0
-    dyn_vel_sd: float = 0.05
-    dyn_m_sd: float = 1.0
+    tof: float  # days
+    max_thrust: float  # kg*km/s^2
+    exhaust_vel: float  # km/s
+
+    dyn_pos_sd: float = 1.0  # km
+    dyn_vel_sd: float = 0.05  # km/s
