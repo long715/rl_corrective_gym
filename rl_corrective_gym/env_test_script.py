@@ -8,6 +8,7 @@ This also contains test training scripts for the gym.
 
 import argparse
 import json
+import time
 
 import gymnasium as gym
 import numpy as np
@@ -16,6 +17,7 @@ from stable_baselines3.common import env_checker
 from stable_baselines3.common.evaluation import evaluate_policy
 import pandas as pd
 import matplotlib.pyplot as plt
+from gym_env_setup.corrective_transfer_env import KM, AU, DAY
 
 # TODO: was used in the initial testing for preliminary validation, would like to
 # eventually update the test functions to use the new one
@@ -172,6 +174,7 @@ def test_debug(df_id: int = 15):
     print(env._reward_function(vmax, corrective_impulse, placeholder, placeholder))
 
     # TEST PROPAGATION
+    env.reset(seed=10)
     print(env._propagate(True, corrective_impulse))  # minor changes
     print(env._propagate(False))
 
@@ -185,39 +188,110 @@ def test_debug(df_id: int = 15):
 def test_deviations():
     # single sample
     env: CorrectiveTransferEnvironment = test_init()
+    seed = 3
     env.reset()
-    action = env.sample_action()
-    _, _, _, _, info = env.step(action)
+    env.set_seed(seed)
 
-    # plot the deviations
     nom_terminal = env.nominal_traj[-1]
-    ngui_terminal = info["no_gui_terminal_state"]
-    gui_terminal = info["gui_terminal_state"]
+    ngui_terminal: np.ndarray = env._propagate(False)
 
-    print(
-        np.linalg.norm((ngui_terminal - nom_terminal)[0:3]),
-        np.linalg.norm((ngui_terminal - nom_terminal)[3:6]),
-    )
+    gui_pos = np.array([])
+    gui_vel = np.array([])
+
+    exhaust_vel_m: float = env.exhaust_vel  # km/s
+    m0: float = env.state[-1]  # kg
+    vmax: float = exhaust_vel_m * np.log(
+        (m0 * exhaust_vel_m) / (m0 * exhaust_vel_m - env.max_thrust * env.timestep)
+    )  # km/s
 
     plt.figure()
+    ax = plt.subplot(1, 2, 2, projection="3d")
+    plt.title("Sampled Actions")
+
+    for _ in range(5000):
+        action = env.sample_action()
+        corrective_impulse: np.ndarray = env._get_control_input(vmax, action)
+
+        # plot the deviations
+        gui_terminal = env._propagate(True, corrective_impulse)
+
+        gui_pos = np.append(
+            gui_pos, np.linalg.norm(gui_terminal[0:3] - nom_terminal[0:3])
+        )
+        gui_vel = np.append(
+            gui_vel, np.linalg.norm(gui_terminal[3:6] - nom_terminal[3:6])
+        )
+
+        # want to see if control range is covered by sample
+        action_unit = action[0] * (action[1:4] / np.linalg.norm(action[1:4]))
+        ax.plot(action_unit[0], action_unit[1], action_unit[2], "rx")
+
+        if (
+            np.linalg.norm(gui_terminal[0:3] - nom_terminal[0:3]) == 0
+            and np.linalg.norm(gui_terminal[3:6] - nom_terminal[3:6]) == 0
+        ):
+            print("SUCCESS")
+
+    plt.subplot(1, 2, 1)
+    plt.title(f"Terminal Deviations for timestep {env.chosen_timestamp}")
     plt.plot(
         np.linalg.norm(ngui_terminal[0:3] - nom_terminal[0:3]),
         np.linalg.norm(ngui_terminal[3:6] - nom_terminal[3:6]),
         "rx",
         label="ngui",
     )
+
+    print(
+        np.linalg.norm(ngui_terminal[0:3] - nom_terminal[0:3]),
+        np.linalg.norm(ngui_terminal[3:6] - nom_terminal[3:6]),
+    )
+
     plt.plot(
-        np.linalg.norm(gui_terminal[0:3] - nom_terminal[0:3]),
-        np.linalg.norm(gui_terminal[3:6] - nom_terminal[3:6]),
+        gui_pos,
+        gui_vel,
         "bx",
         label="gui",
     )
-
     plt.xlabel("Position magnitude error")
     plt.ylabel("Velocity magnitude error")
     plt.legend()
-    print(env.noise)
+
     plt.show()
+
+
+def test_stm():
+    env: CorrectiveTransferEnvironment = test_init()
+    env.set_seed(10)
+    env.reset()
+
+    # TEST NO GUID
+    final_state = env.nominal_traj[-1, 0:6]
+
+    start_prop = time.time()
+    actual_dev = env._propagate(False)[0:6] - final_state
+    print(f"elapsed prop: {time.time() - start_prop}")
+
+    # rand_imp = np.array([5.0, 1.0, 0.0])
+    # guid_dev = env._propagate(True, rand_imp)[0:6] - final_state
+
+    phi_compute = time.time()
+    phi = env._stm_pert()
+    print(f"phi compute: {time.time()-phi_compute}")
+
+    start_phi = time.time()
+    stm_dev = phi @ env.noise[0:6]
+    # guid_stm_dev = phi @ (
+    #     env.noise[0:6] + np.concatenate((np.array([0.0, 0.0, 0.0]), rand_imp))
+    # )
+    print(f"elapsed phi: {time.time() - start_phi}")
+
+    print(actual_dev, stm_dev)
+    # print(guid_dev, guid_stm_dev)
+
+    # error for pos > tol; accurate enough
+    tol = 1e-5
+    # assert np.all(abs(actual_dev - stm_dev) < tol), "No Guid Error"
+    # assert np.all(abs(guid_dev - guid_stm_dev) < tol), "Guid Error"
 
 
 if __name__ == "__main__":
@@ -240,6 +314,7 @@ if __name__ == "__main__":
             "control_input",
             "debug",
             "dev",
+            "stm",
         ],
     )
     args = parser.parse_args()
@@ -260,5 +335,7 @@ if __name__ == "__main__":
         test_debug()
     elif args.task == "dev":
         test_deviations()
+    elif args.task == "stm":
+        test_stm()
     else:
         test_eval(args.algo)
