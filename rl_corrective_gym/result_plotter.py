@@ -14,8 +14,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 
-from mpl_toolkits import mplot3d
-
 from rl_corrective_gym.env_test_script import test_init
 from rl_corrective_gym.gym_env_setup.corrective_transfer_env import (
     CorrectiveTransferEnvironment,
@@ -73,9 +71,9 @@ def plot_terminal():
     for state in df["gui_terminal_state"][-1000:].to_numpy():
         # ignore the mass for now
         state_numpy: np.ndarray = np.fromstring(state.strip("[]"), sep=" ")
-        print(
-            f"Guidance: {np.linalg.norm(state_numpy[0:6] - nominal_terminal_state[0:6])}"
-        )
+        # print(
+        #     f"Guidance: {np.linalg.norm(state_numpy[0:6] - nominal_terminal_state[0:6])}"
+        # )
 
         state_pos = np.append(
             state_pos, np.linalg.norm(state_numpy[0:3] - nominal_terminal_state[0:3])
@@ -98,9 +96,9 @@ def plot_terminal():
     for state in df["no_gui_terminal_state"][-1000:].to_numpy():
         # ignore the mass for now
         state_numpy: np.ndarray = np.fromstring(state.strip("[]"), sep=" ")
-        print(
-            f"No Guidance: {np.linalg.norm(state_numpy[0:6] - nominal_terminal_state[0:6])}"
-        )
+        # print(
+        #     f"No Guidance: {np.linalg.norm(state_numpy[0:6] - nominal_terminal_state[0:6])}"
+        # )
 
         state_pos = np.append(
             state_pos, np.linalg.norm(state_numpy[0:3] - nominal_terminal_state[0:3])
@@ -110,6 +108,20 @@ def plot_terminal():
         )
 
     plt.plot(state_pos, state_vel, "rx", label="no_guid")
+
+    # OPTIMAL CONTROL - assume single sample
+    env: CorrectiveTransferEnvironment = test_init()
+    env.chosen_timestamp = df["timestep"][0]
+    env.noise = np.fromstring(df["noise"][0].strip("[]"), sep=" ")
+    env.state = env.nominal_traj[env.chosen_timestamp] + env.noise
+    env._init_logs()
+    opt_control: np.ndarray = env._optimal_control() - env.noise[3:6]
+    print(opt_control)
+
+    optimal_dev: np.ndarray = env._propagate(True, opt_control) - nominal_terminal_state
+    opt_pos: float = np.linalg.norm(optimal_dev[0:3])
+    opt_vel: float = np.linalg.norm(optimal_dev[3:6])
+    plt.plot(opt_pos, opt_vel, "kx", label="optimal")
 
     plt.legend()
 

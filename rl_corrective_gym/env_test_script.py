@@ -17,7 +17,6 @@ from stable_baselines3.common import env_checker
 from stable_baselines3.common.evaluation import evaluate_policy
 import pandas as pd
 import matplotlib.pyplot as plt
-from gym_env_setup.corrective_transfer_env import KM, AU, DAY
 
 # TODO: was used in the initial testing for preliminary validation, would like to
 # eventually update the test functions to use the new one
@@ -292,6 +291,10 @@ def test_stm():
     tol = 1e-5
     # assert np.all(abs(actual_dev - stm_dev) < tol), "No Guid Error"
     # assert np.all(abs(guid_dev - guid_stm_dev) < tol), "Guid Error"
+
+    # TEST OPT CONTROL
+    opt_control = env._optimal_control()
+    print(opt_control)
 
 
 if __name__ == "__main__":

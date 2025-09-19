@@ -99,7 +99,8 @@ class CorrectiveTransferEnvironment(gym.Env):
         # init state is the first state by default (no noise)
         self.state: np.ndarray = self.nominal_traj[0, :]
         self.chosen_timestamp: int = 0
-        self.noise: np.ndarray = np.array([0] * 4)
+        self.noise: np.ndarray = np.array([0] * 7)
+        self.opt_control: np.ndarray = np.array([0] * 3)
 
         # logging purposes
         self.gui_log_pos: np.ndarray = np.array([])
@@ -224,6 +225,7 @@ class CorrectiveTransferEnvironment(gym.Env):
             "corrective_impulse": corrective_impulse,
             "gui_terminal_state": gui_xf,
             "no_gui_terminal_state": no_gui_xf,
+            "optimal_control": self.opt_control,
         }
         return gui_xf, total_reward, True, False, info
 
@@ -410,6 +412,7 @@ class CorrectiveTransferEnvironment(gym.Env):
             (np.random.multivariate_normal(mean, cov), np.array([0]))
         )
         self.state = chosen_state + self.noise
+        self.opt_control = self._optimal_control()
 
     def _dynamics(self, t, x: array, params) -> array:
         # Keplerian 2-body equations of motions
@@ -431,10 +434,25 @@ class CorrectiveTransferEnvironment(gym.Env):
         tf: float = (self.num_timesteps - self.chosen_timestamp) * self.timestep
         # define the DA variables - in this case, the variables
         # are the EOM variables themselves
-
-        x0: array = array(self.state[0:6] + [DA(1), DA(2), DA(3), DA(4), DA(5), DA(6)])
+        chosen_state: np.ndarray = self.nominal_traj[self.chosen_timestamp, :][0:6]
+        x0: array = array(chosen_state + [DA(1), DA(2), DA(3), DA(4), DA(5), DA(6)])
 
         with DA.cache_manager():
             xf_DA = RK78(x0, 0.0, tf, self._dynamics, None)
 
         return xf_DA.linear()
+
+    def _optimal_control(self) -> np.ndarray:
+        """
+        Computes the least squares solution for the optimal control to reduce
+        the deviation:
+
+        delta(v) = -(A_T @ A)^(-1) @ A_T @ x
+        where x is the error to correct
+        """
+        full_phi: np.ndarray = self._stm_pert()
+        # A is the second half of the STM (6x3), impact of vel dev
+        A: np.ndarray = full_phi[:, 3:6]
+        A_T: np.ndarray = np.transpose(A)
+
+        return -(np.linalg.inv(A_T @ A) @ A_T) @ self.noise[0:6]

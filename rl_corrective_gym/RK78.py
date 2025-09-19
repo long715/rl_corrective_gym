@@ -22,10 +22,10 @@ def _RK78_dace(
 
     N = len(X0)
 
-    H0 = 1e-6
-    HS = 0.1
-    H1 = 10.0
-    EPS = 1.0e-12
+    H0 = 10000  # min step
+    HS = 50000  # init step
+    H1 = 86400  # max step
+    EPS = 1.0e-4
     BS = 20 * EPS
 
     Z = array.zeros((N, 16))
