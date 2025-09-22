@@ -11,3 +11,5 @@ class SpaceEnvironmentConfig:
 
     dyn_pos_sd: float = 1.0  # km
     dyn_vel_sd: float = 0.05  # km/s
+
+    max_corr: float = 0.01  # km/s

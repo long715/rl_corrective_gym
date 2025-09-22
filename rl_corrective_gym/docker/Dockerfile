@@ -1,3 +1,8 @@
+'''
+Note for usage: 
+    - ensure that the commit id for each package is updated to the latest release for the experiements
+'''
+
 FROM continuumio/anaconda3
 
 # setup task dependencies 
@@ -7,7 +12,7 @@ RUN bash -c "source /opt/conda/etc/profile.d/conda.sh &&\
     conda config --add channels conda-forge &&\
     conda config --set channel_priority strict &&\
     conda install pykep &&\ 
-    pip install stable-baselines3 &&\ 
+    pip install stable-baselines3 daceypy &&\ 
     conda install python=3.11"
 
 WORKDIR /space-task

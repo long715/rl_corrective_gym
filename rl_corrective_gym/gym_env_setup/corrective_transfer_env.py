@@ -1,6 +1,7 @@
 """
 Author: Lee Violet Ong
-Date: 18/08/25
+Date: 22/09/25 (v1.1)
+- incorporation of single sample env context (init state does not change)
 """
 
 # Directory setup
@@ -27,7 +28,7 @@ from rl_corrective_gym.gym_env_setup.space_env_config import SpaceEnvironmentCon
 from rl_corrective_gym.RK78 import RK78
 
 # CONSTANTS
-AU = 1.495978707e11
+AU = 1.49597870691e8  # km
 DAY = 86400
 
 
@@ -44,8 +45,7 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         # define universal parameters
         self.sun_mu: float = 1.32712440018e11
-        self.au: float = 1.49597870691e8  # km
-        self.ve: float = np.sqrt(self.sun_mu / self.au)  # orbital velocity of earth
+        self.ve: float = np.sqrt(self.sun_mu / AU)  # orbital velocity of earth
 
         # define required information from SCP data
         # [pos (km), vel (km/s), m (kg)]
@@ -72,6 +72,7 @@ class CorrectiveTransferEnvironment(gym.Env):
         # thruster config
         self.max_thrust: float = config.max_thrust  # N, kg km/s^2
         self.exhaust_vel: float = config.exhaust_vel  # km/s
+        self.max_corr: float = config.max_corr  # km/s
 
         # reward (no-dim)
         self.penalty_scale_control: float = 100.0
@@ -199,17 +200,14 @@ class CorrectiveTransferEnvironment(gym.Env):
 
     def step(self, action) -> tuple:
         # compute the vmax based on the mass before impulse
-        m0: float = self.state[-1]  # kg
-        vmax: float = self.exhaust_vel * np.log(
-            (m0 * self.exhaust_vel)
-            / (m0 * self.exhaust_vel - self.max_thrust * self.timestep)
-        )  # km/s
+        vmax: float = self._get_vmax()
         corrective_impulse: np.ndarray = self._get_control_input(vmax, action)
 
         # propagate to the final timestamp
         # NOTE: could use pykep propagate_lagrangian function (ref: https://esa.github.io/pykep/documentation/core.html#pykep.propagate_lagrangian)
         no_gui_xf: np.ndarray = self._propagate(False)
         gui_xf: np.ndarray = self._propagate(True, corrective_impulse)
+
         total_reward, reward_control_penalty, reward_dyn = self._reward_function(
             vmax, corrective_impulse, gui_xf, no_gui_xf
         )
@@ -228,16 +226,6 @@ class CorrectiveTransferEnvironment(gym.Env):
             "optimal_control": self.opt_control,
         }
         return gui_xf, total_reward, True, False, info
-
-    def _mass_update(self, m0: float, impulse: np.ndarray) -> float:
-        """
-        Implements the Tsiolkovsky Rocket Equation for the mass update.
-
-        Arguments:
-        - m0: the current mass at t before impulse (kg)
-        - impulse: the total impulse vector at t (km/s)
-        """
-        return m0 * np.exp(-np.linalg.norm(impulse) / self.exhaust_vel)
 
     def _reward_function(
         self,
@@ -277,6 +265,26 @@ class CorrectiveTransferEnvironment(gym.Env):
         total_reward: float = reward_control_penalty + reward_dyn
         return total_reward, reward_control_penalty, reward_dyn
 
+    def _mass_update(self, m0: float, impulse: np.ndarray) -> float:
+        """
+        Implements the Tsiolkovsky Rocket Equation for the mass update.
+
+        Arguments:
+        - m0: the current mass at t before impulse (kg)
+        - impulse: the total impulse vector at t (km/s)
+        """
+        return m0 * np.exp(-np.linalg.norm(impulse) / self.exhaust_vel)
+
+    def _get_vmax(self) -> float:
+        """
+        Computes the norm of the maximum impulse, using the Tsiolvosky equation.
+        """
+        m0: float = self.state[-1]  # kg
+        return self.exhaust_vel * np.log(
+            (m0 * self.exhaust_vel)
+            / (m0 * self.exhaust_vel - self.max_thrust * self.timestep)
+        )  # km/s
+
     def _get_control_input(self, vmax: float, action) -> np.ndarray:
         """
         As the mass is unchanged, chosen control input will always be bounded.
@@ -299,12 +307,12 @@ class CorrectiveTransferEnvironment(gym.Env):
         B: float = np.power(np.linalg.norm(nominal_imp), 2) - np.power(vmax, 2)
         roots: np.ndarray = np.roots([1, A, B])
 
-        # control max is 10 m/s
-        corrective_mag = min(np.max(roots), 0.01)
+        corrective_mag = min(np.max(roots), self.max_corr)
         return corrective_mag * (1 + action[0]) / 2 * action_unit
 
     def _law_of_cosine(self, theta: float, a: float, c: float):
         """
+        [ARCHIVED]
         law of cosine: c^2 = a^2 + b^2 - 2ab cos(theta')
 
         b^2 + Ab + B = 0
@@ -328,6 +336,11 @@ class CorrectiveTransferEnvironment(gym.Env):
     def _propagate(
         self, is_guid: bool, corrective_impulse: np.ndarray = [0.0, 0.0, 0.0]
     ) -> np.ndarray:
+        """
+        Propagates the chosen global state to the terminal timestep.
+        Returns the terminal state.
+        """
+
         total_impulse: np.ndarray = copy.deepcopy(
             self.nominal_imp[self.chosen_timestamp]
         )  # km/s
@@ -395,6 +408,10 @@ class CorrectiveTransferEnvironment(gym.Env):
         self.nogui_log_m = self.nominal_traj[0 : self.chosen_timestamp, -1]
 
     def _init_state(self):
+        """
+        Initialises the global state ie. choses the timestep and perturbation applied.
+        """
+
         # for now, randomly choose the perturbed state with uniform probability
         self.chosen_timestamp = random.randint(0, self.num_timesteps - 1)
         chosen_state: np.ndarray = self.nominal_traj[self.chosen_timestamp, :]
@@ -455,4 +472,4 @@ class CorrectiveTransferEnvironment(gym.Env):
         A: np.ndarray = full_phi[:, 3:6]
         A_T: np.ndarray = np.transpose(A)
 
-        return -(np.linalg.inv(A_T @ A) @ A_T) @ self.noise[0:6]
+        return -(np.linalg.inv(A_T @ A) @ A_T) @ self.noise[0:6] - self.noise[0:6]
