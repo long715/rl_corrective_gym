@@ -208,14 +208,13 @@ class CorrectiveTransferEnvironment(gym.Env):
         no_gui_xf: np.ndarray = self._propagate(False)
         gui_xf: np.ndarray = self._propagate(True, corrective_impulse)
 
-        total_reward, reward_control_penalty, reward_dyn = self._reward_function(
-            vmax, corrective_impulse, gui_xf, no_gui_xf
-        )
+        rewards = self._reward_function(vmax, corrective_impulse, gui_xf, no_gui_xf)
 
         # terminal state, reward, done, truncated, info
         info: dict = {
-            "reward_control_penalty": reward_control_penalty,
-            "reward_dyn": reward_dyn,
+            # "reward_effort": rewards["effort"],
+            "reward_control_penalty": rewards["control_penalty"],
+            "reward_dyn": rewards["dynamics"],
             "timestep": self.chosen_timestamp,
             "noise": self.noise,
             "vmax": vmax,
@@ -225,7 +224,7 @@ class CorrectiveTransferEnvironment(gym.Env):
             "no_gui_terminal_state": no_gui_xf,
             "optimal_control": self.opt_control,
         }
-        return gui_xf, total_reward, True, False, info
+        return gui_xf, rewards["total"], True, False, info
 
     def _reward_function(
         self,
@@ -233,7 +232,7 @@ class CorrectiveTransferEnvironment(gym.Env):
         control_imp: np.ndarray,
         guid_xf: np.ndarray,
         no_guid_xf: np.ndarray,
-    ):
+    ) -> dict:
         nominal_imp: np.ndarray = self.nominal_imp[self.chosen_timestamp]
         total_corrective_imp: np.ndarray = nominal_imp + control_imp
 
@@ -254,16 +253,23 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         # =============== DYNAMICS REWARD/PENALTY ==================
         nom_rv_final: np.ndarray = self.nominal_traj[-1, :]
-        error_no_guid: np.ndarray = no_guid_xf - nom_rv_final
+        # error_no_guid: np.ndarray = no_guid_xf - nom_rv_final
         error_guid: np.ndarray = guid_xf - nom_rv_final
 
         # NOTE: for now euclidean, can change into weighted norm
-        error_no_guid_mag: float = np.linalg.norm(error_no_guid[0:6])
-        error_guid_mag: float = np.linalg.norm(error_guid[0:6])
-        reward_dyn = -error_guid_mag / error_no_guid_mag * self.penalty_scale_dynamics
+        # error_no_guid_mag: float = np.linalg.norm(error_no_guid[0:6])
+        gpos_rew: float = 1 / (1 + np.linalg.norm(error_guid[0:3]))
+        gvel_rew: float = 1 / (1 + np.linalg.norm(error_guid[3:6]))
+
+        reward_dyn = -(3 / (1 + gpos_rew + gvel_rew)) + 1 * self.penalty_scale_dynamics
 
         total_reward: float = reward_control_penalty + reward_dyn
-        return total_reward, reward_control_penalty, reward_dyn
+        return {
+            "total": total_reward,
+            # "effort": reward_effort,
+            "control_penalty": reward_control_penalty,
+            "dynamics": reward_dyn,
+        }
 
     def _mass_update(self, m0: float, impulse: np.ndarray) -> float:
         """
