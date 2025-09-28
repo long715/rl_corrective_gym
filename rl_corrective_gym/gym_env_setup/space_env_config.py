@@ -4,6 +4,10 @@ class SpaceEnvironmentConfig:
 
     # defines if we want to reset to the same timestep
     single_run: bool
+    
+    # defines the reward function to use
+    dyn_rew: int
+    effort_rew: int
 
     tof: float  # days
     max_thrust: float  # kg*km/s^2

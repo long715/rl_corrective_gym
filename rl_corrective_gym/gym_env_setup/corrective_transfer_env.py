@@ -74,6 +74,10 @@ class CorrectiveTransferEnvironment(gym.Env):
         self.exhaust_vel: float = config.exhaust_vel  # km/s
         self.max_corr: float = config.max_corr  # km/s
 
+        # reward function config
+        self.dyn_rew: int = config.dyn_rew
+        self.effort_rew: int = config.effort_rew
+
         # reward (no-dim)
         self.penalty_scale_control: float = 100.0
         self.penalty_scale_dynamics: float = 10.0
@@ -101,7 +105,6 @@ class CorrectiveTransferEnvironment(gym.Env):
         self.state: np.ndarray = self.nominal_traj[0, :]
         self.chosen_timestamp: int = 0
         self.noise: np.ndarray = np.array([0] * 7)
-        self.opt_control: np.ndarray = np.array([0] * 3)
 
         # logging purposes
         self.gui_log_pos: np.ndarray = np.array([])
@@ -205,24 +208,29 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         # propagate to the final timestamp
         # NOTE: could use pykep propagate_lagrangian function (ref: https://esa.github.io/pykep/documentation/core.html#pykep.propagate_lagrangian)
-        no_gui_xf: np.ndarray = self._propagate(False)
         gui_xf: np.ndarray = self._propagate(True, corrective_impulse)
+        ngui_xf: np.ndarray = self._propagate(False)
 
-        rewards = self._reward_function(vmax, corrective_impulse, gui_xf, no_gui_xf)
+        xf: np.ndarray = self.nominal_traj[-1, :]
+        gui_err: np.ndarray = gui_xf - xf
+        ngui_err: np.ndarray = ngui_xf - xf
+
+        rewards = self._reward_function(
+            vmax, corrective_impulse, gui_err[0:6], ngui_err[0:6]
+        )
 
         # terminal state, reward, done, truncated, info
         info: dict = {
-            # "reward_effort": rewards["effort"],
-            "reward_control_penalty": rewards["control_penalty"],
             "reward_dyn": rewards["dynamics"],
+            "reward_effort": rewards["effort"],
+            "reward_misc": rewards["misc"],
             "timestep": self.chosen_timestamp,
             "noise": self.noise,
             "vmax": vmax,
             "action": action,
             "corrective_impulse": corrective_impulse,
             "gui_terminal_state": gui_xf,
-            "no_gui_terminal_state": no_gui_xf,
-            "optimal_control": self.opt_control,
+            "no_gui_terminal_state": ngui_xf,
         }
         return gui_xf, rewards["total"], True, False, info
 
@@ -230,46 +238,104 @@ class CorrectiveTransferEnvironment(gym.Env):
         self,
         vmax: float,
         control_imp: np.ndarray,
-        guid_xf: np.ndarray,
-        no_guid_xf: np.ndarray,
+        gui_err: np.ndarray,
+        ngui_err: np.ndarray,
     ) -> dict:
-        nominal_imp: np.ndarray = self.nominal_imp[self.chosen_timestamp]
-        total_corrective_imp: np.ndarray = nominal_imp + control_imp
+        reward_dyn: float = self._reward_dynamics(gui_err, ngui_err)
+        reward_effort: float = self._reward_effort(control_imp)
+        reward_misc: float = self._reward_misc(control_imp, vmax)
 
-        # reward/penalty for effort
-        nominal_imp_mag: float = np.linalg.norm(nominal_imp)
-        reward_effort: float = (
-            (nominal_imp_mag - np.linalg.norm(total_corrective_imp))
-            / nominal_imp_mag
-            * self.penalty_scale_effort
-        )
+        total_reward: float = reward_dyn + reward_effort + reward_misc
 
-        # penalty for exceeding the control limits
-        # NOTE: with constraints, this should be zero
-        control_diff: float = vmax - np.linalg.norm(total_corrective_imp)
-        reward_control_penalty: float = 0
-        if control_diff < 0:
-            reward_control_penalty = (control_diff / vmax) * self.penalty_scale_control
-
-        # =============== DYNAMICS REWARD/PENALTY ==================
-        nom_rv_final: np.ndarray = self.nominal_traj[-1, :]
-        # error_no_guid: np.ndarray = no_guid_xf - nom_rv_final
-        error_guid: np.ndarray = guid_xf - nom_rv_final
-
-        # NOTE: for now euclidean, can change into weighted norm
-        # error_no_guid_mag: float = np.linalg.norm(error_no_guid[0:6])
-        gpos_rew: float = 1 / (1 + np.linalg.norm(error_guid[0:3]))
-        gvel_rew: float = 1 / (1 + np.linalg.norm(error_guid[3:6]))
-
-        reward_dyn = -(3 / (1 + gpos_rew + gvel_rew)) + 1 * self.penalty_scale_dynamics
-
-        total_reward: float = reward_control_penalty + reward_dyn
         return {
             "total": total_reward,
-            # "effort": reward_effort,
-            "control_penalty": reward_control_penalty,
             "dynamics": reward_dyn,
+            "effort": reward_effort,
+            "misc": reward_misc,
         }
+
+    def _reward_dynamics(self, gui_err: np.ndarray, ngui_err: np.ndarray) -> float:
+        """
+        Computes the reward associated to the state deviation.
+
+        Arguments:
+        - guid_err: 6-dim deviation vector of guided xf (w/ corrective imp) from desired xf
+        - no_guid_err: 6-dim deviation vector of non-guided xf from desired xf
+        """
+
+        reward: float = 0.0
+
+        gui_norm: float = np.linalg.norm(gui_err)
+        ngui_norm: float = np.linalg.norm(ngui_err)
+
+        if self.dyn_rew == 0:
+            # corresponds to reward function 1
+            delta: float = ngui_norm - gui_norm
+            reward = np.sign(delta) * (1 - 1 / (1 + abs(delta)))
+
+        elif self.dyn_rew == 1:
+            # corresponds to reward function 2
+            reward = 1 / (1 + gui_norm) - 1
+
+        elif self.dyn_rew == 2:
+            # corresponds to reward function 3
+            prew: float = 1 / (1 + np.linalg.norm(gui_err[0:3]))
+            vrew: float = 1 / (1 + np.linalg.norm(gui_err[3:6]))
+
+            reward = 1 - 3 / (1 + prew + vrew)
+        else:
+            assert False, "No such dynamics reward function"
+
+        return reward
+
+    def _reward_effort(self, control_imp: np.ndarray) -> float:
+        """
+        Computes the control effort reward. (Optional i.e. can be NONE if config = 0)
+
+        Arguments:
+        - control_imp: the control impulse chosen
+        """
+
+        reward: float = 0.0
+
+        if self.effort_rew == 0:  # NONE
+            pass
+
+        elif self.effort_rew == 1:
+            # corresponds to reward function 6
+            total_imp: np.ndarray = (
+                self.nominal_imp[self.chosen_timestamp] + control_imp
+            )
+            unit_dir: np.ndarray = total_imp / np.linalg.norm(total_imp)
+
+            reward = -np.dot(control_imp, unit_dir) / self.max_corr
+
+        else:
+            assert False, "No such control effort reward function"
+
+        return reward
+
+    def _reward_misc(self, control_imp: np.ndarray, vmax: float) -> float:
+        """
+        Computes the miscs rewards i.e. must haves for constraints.
+        Current content: control penalty.
+        TODO: bitmask when content increases
+
+        Arguments:
+        - control_imp: the control impulse chosen
+        - vmax: norm of the total possible imp at the timestep
+        """
+
+        reward: float = 0.0
+
+        total_imp: np.ndarray = self.nominal_imp[self.chosen_timestamp] + control_imp
+        over_imp: float = np.linalg.norm(total_imp) - vmax
+        tol: float = 1e-3
+
+        if over_imp > 0:
+            reward = tol / (tol + over_imp) - 1
+
+        return reward
 
     def _mass_update(self, m0: float, impulse: np.ndarray) -> float:
         """
@@ -435,7 +501,6 @@ class CorrectiveTransferEnvironment(gym.Env):
             (np.random.multivariate_normal(mean, cov), np.array([0]))
         )
         self.state = chosen_state + self.noise
-        self.opt_control = self._optimal_control()
 
     def _dynamics(self, t, x: array, params) -> array:
         # Keplerian 2-body equations of motions

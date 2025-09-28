@@ -5,6 +5,8 @@
   "traj_filename": "SCP_impulsive_traj.csv",
   "impulse_filename": "SCP_dV.csv",
   "single_run": 0,
+  "dyn_rew": 0,
+  "effort_rew": 0,
 
   "tof": 348.79,
   "max_thrust": 0.0005,
