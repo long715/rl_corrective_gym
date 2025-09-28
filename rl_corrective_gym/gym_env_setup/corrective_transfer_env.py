@@ -282,7 +282,7 @@ class CorrectiveTransferEnvironment(gym.Env):
             prew: float = 1 / (1 + np.linalg.norm(gui_err[0:3]))
             vrew: float = 1 / (1 + np.linalg.norm(gui_err[3:6]))
 
-            reward = 1 - 3 / (1 + prew + vrew)
+            reward = (1 - 3 / (1 + prew + vrew)) / 2
         else:
             assert False, "No such dynamics reward function"
 
