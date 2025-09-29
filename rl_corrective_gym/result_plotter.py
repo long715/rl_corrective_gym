@@ -20,7 +20,7 @@ from rl_corrective_gym.gym_env_setup.corrective_transfer_env import (
 )
 
 df = pd.read_csv(
-    "../../SAC-mars-25_09_15_11-53-46/10/data/eval.csv",
+    "../../SAC-mars-25_09_29_14-17-38/10/data/eval.csv",
     on_bad_lines="skip",
     engine="python",
 )
@@ -68,7 +68,7 @@ def plot_terminal():
     state_pos: np.ndarray = np.array([])
     state_vel: np.ndarray = np.array([])
 
-    for state in df["gui_terminal_state"][-1000:].to_numpy():
+    for state in df["gui_terminal_state"][-580:].to_numpy():
         # ignore the mass for now
         state_numpy: np.ndarray = np.fromstring(state.strip("[]"), sep=" ")
         # print(
@@ -93,7 +93,7 @@ def plot_terminal():
     state_pos: np.ndarray = np.array([])
     state_vel: np.ndarray = np.array([])
 
-    for state in df["no_gui_terminal_state"][-1000:].to_numpy():
+    for state in df["no_gui_terminal_state"][-580:].to_numpy():
         # ignore the mass for now
         state_numpy: np.ndarray = np.fromstring(state.strip("[]"), sep=" ")
         # print(
@@ -115,7 +115,15 @@ def plot_terminal():
     env.noise = np.fromstring(df["noise"][0].strip("[]"), sep=" ")
     env.state = env.nominal_traj[env.chosen_timestamp] + env.noise
     env._init_logs()
-    opt_control: np.ndarray = env._optimal_control() - env.noise[3:6]
+    opt_control: np.ndarray = env._optimal_control()
+
+    # check for the optimal control
+    if (
+        np.linalg.norm(opt_control + env.nominal_imp[env.chosen_timestamp])
+        > df["vmax"][0]
+    ):
+        print("Optimal Control Not Feasible")
+
     print(opt_control)
 
     optimal_dev: np.ndarray = env._propagate(True, opt_control) - nominal_terminal_state

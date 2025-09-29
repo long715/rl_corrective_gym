@@ -42,6 +42,7 @@ class CorrectiveTransferEnvironment(gym.Env):
         traj_filename: str = config.traj_filename
         impulse_filename: str = config.impulse_filename
         self.single_run: bool = config.single_run
+        self.is_reset: bool = False
 
         # define universal parameters
         self.sun_mu: float = 1.32712440018e11
@@ -114,10 +115,6 @@ class CorrectiveTransferEnvironment(gym.Env):
         self.nogui_log_pos: np.ndarray = np.array([])
         self.nogui_log_vel: np.ndarray = np.array([])
         self.nogui_log_m: np.ndarray = np.array([])
-
-        # initialise state here since reset will just init logs
-        if self.single_run:
-            self._init_state()
 
     @cached_property
     def max_action_value(self) -> float:
@@ -196,8 +193,9 @@ class CorrectiveTransferEnvironment(gym.Env):
         super().reset()
         self._init_logs()
 
-        if not self.single_run:
+        if not self.single_run or (self.single_run and not self.is_reset):
             self._init_state()
+            self.is_reset = True
 
         return self.state
 
@@ -543,4 +541,4 @@ class CorrectiveTransferEnvironment(gym.Env):
         A: np.ndarray = full_phi[:, 3:6]
         A_T: np.ndarray = np.transpose(A)
 
-        return -(np.linalg.inv(A_T @ A) @ A_T) @ self.noise[0:6] - self.noise[0:6]
+        return -(np.linalg.inv(A_T @ A) @ A_T) @ self.noise[0:6] - self.noise[3:6]
