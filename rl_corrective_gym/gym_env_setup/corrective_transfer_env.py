@@ -42,7 +42,7 @@ class CorrectiveTransferEnvironment(gym.Env):
         traj_filename: str = config.traj_filename
         impulse_filename: str = config.impulse_filename
         self.single_run: bool = config.single_run
-        self.is_reset: bool = False
+        self.is_single_reset: bool = True
 
         # define universal parameters
         self.sun_mu: float = 1.32712440018e11
@@ -192,10 +192,7 @@ class CorrectiveTransferEnvironment(gym.Env):
     def reset(self, *, training: bool = True) -> np.ndarray:
         super().reset()
         self._init_logs()
-
-        if not self.single_run or (self.single_run and not self.is_reset):
-            self._init_state()
-            self.is_reset = True
+        self._init_state()
 
         return self.state
 
@@ -483,7 +480,11 @@ class CorrectiveTransferEnvironment(gym.Env):
         """
 
         # for now, randomly choose the perturbed state with uniform probability
-        self.chosen_timestamp = random.randint(0, self.num_timesteps - 1)
+        # only thing changing in multi-sample is the timestep
+        if (self.single_run and self.is_single_reset) or not self.single_run:
+            self.chosen_timestamp = random.randint(0, self.num_timesteps - 1)
+            self.is_single_reset = False
+
         chosen_state: np.ndarray = self.nominal_traj[self.chosen_timestamp, :]
 
         # covariance matrix set up
