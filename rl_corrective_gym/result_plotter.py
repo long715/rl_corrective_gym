@@ -20,7 +20,7 @@ from rl_corrective_gym.gym_env_setup.corrective_transfer_env import (
 )
 
 df = pd.read_csv(
-    "../../SAC-mars-25_09_29_14-17-38/10/data/eval.csv",
+    "../../SAC-mars-25_09_30_14-05-02/10/data/eval.csv",
     on_bad_lines="skip",
     engine="python",
 )
@@ -57,7 +57,8 @@ def plot_rewards():
 def plot_terminal():
     """
     Plots the terminal pos magnitude in the x axis and terminal
-    vel magnitude in the y axis.
+    vel magnitude in the y axis. Used to compare the deviation of
+    different control schemes: optimal, guided, unguided
     """
     # desired terminal state
     nominal_terminal_state: np.ndarray = pd.read_csv(
@@ -68,63 +69,62 @@ def plot_terminal():
     state_pos: np.ndarray = np.array([])
     state_vel: np.ndarray = np.array([])
 
-    for state in df["gui_terminal_state"][-580:].to_numpy():
+    for state in df["gui_terminal_state"][-1000:].to_numpy():
         # ignore the mass for now
-        state_numpy: np.ndarray = np.fromstring(state.strip("[]"), sep=" ")
-        # print(
-        #     f"Guidance: {np.linalg.norm(state_numpy[0:6] - nominal_terminal_state[0:6])}"
-        # )
+        state_numpy: np.ndarray = (
+            np.fromstring(state.strip("[]"), sep=" ") - nominal_terminal_state
+        )
 
-        state_pos = np.append(
-            state_pos, np.linalg.norm(state_numpy[0:3] - nominal_terminal_state[0:3])
-        )
-        state_vel = np.append(
-            state_vel, np.linalg.norm(state_numpy[3:6] - nominal_terminal_state[3:6])
-        )
+        state_pos = np.append(state_pos, np.linalg.norm(state_numpy[0:3]))
+        state_vel = np.append(state_vel, np.linalg.norm(state_numpy[3:6]))
 
     plt.figure()
     plt.title("Terminal State Deviation")
     plt.xlabel("Position magnitude")
     plt.ylabel("Velocity magnitude")
 
-    # plt.plot(nominal_pos, nominal_vel, "k+")
     plt.plot(state_pos, state_vel, "bx", label="guid")
 
+    # reset for no_guid plot
     state_pos: np.ndarray = np.array([])
     state_vel: np.ndarray = np.array([])
 
-    for state in df["no_gui_terminal_state"][-580:].to_numpy():
+    for state in df["no_gui_terminal_state"][-1000:].to_numpy():
         # ignore the mass for now
-        state_numpy: np.ndarray = np.fromstring(state.strip("[]"), sep=" ")
-        # print(
-        #     f"No Guidance: {np.linalg.norm(state_numpy[0:6] - nominal_terminal_state[0:6])}"
-        # )
+        state_numpy: np.ndarray = (
+            np.fromstring(state.strip("[]"), sep=" ") - nominal_terminal_state
+        )
 
-        state_pos = np.append(
-            state_pos, np.linalg.norm(state_numpy[0:3] - nominal_terminal_state[0:3])
-        )
-        state_vel = np.append(
-            state_vel, np.linalg.norm(state_numpy[3:6] - nominal_terminal_state[3:6])
-        )
+        state_pos = np.append(state_pos, np.linalg.norm(state_numpy[0:3]))
+        state_vel = np.append(state_vel, np.linalg.norm(state_numpy[3:6]))
 
     plt.plot(state_pos, state_vel, "rx", label="no_guid")
 
-    # OPTIMAL CONTROL - assume single sample
+    # OPTIMAL CONTROL - assume single sample and take final eval scenario
     env: CorrectiveTransferEnvironment = test_init()
-    env.chosen_timestamp = df["timestep"][0]
-    env.noise = np.fromstring(df["noise"][0].strip("[]"), sep=" ")
+    env.chosen_timestamp = df["timestep"].iloc[-1]
+    env.noise = np.fromstring(df["noise"].iloc[-1].strip("[]"), sep=" ")
     env.state = env.nominal_traj[env.chosen_timestamp] + env.noise
     env._init_logs()
     opt_control: np.ndarray = env._optimal_control()
 
-    # check for the optimal control
-    if (
-        np.linalg.norm(opt_control + env.nominal_imp[env.chosen_timestamp])
-        > df["vmax"][0]
-    ):
-        print("Optimal Control Not Feasible")
+    nom_imp: np.ndarray = env.nominal_imp[env.chosen_timestamp]
+    corr_imp: np.ndarray = np.fromstring(
+        df["corrective_impulse"].iloc[-1].strip("[]"), sep=" "
+    )
+    total: np.ndarray = nom_imp + corr_imp
 
-    print(opt_control)
+    # check for the optimal control
+    if np.linalg.norm(opt_control + nom_imp) > df["vmax"].iloc[-1]:
+        print("FAIL: Optimal Control Not Feasible")
+    else:
+        print("PASS: Optimal Control Feasible")
+
+    # check for effort reduction
+    if np.linalg.norm(total) >= np.linalg.norm(nom_imp):
+        print("FAIL: No improvement in effort ")
+    else:
+        print("PASS: Effort reduced")
 
     optimal_dev: np.ndarray = env._propagate(True, opt_control) - nominal_terminal_state
     opt_pos: float = np.linalg.norm(optimal_dev[0:3])
@@ -132,7 +132,6 @@ def plot_terminal():
     plt.plot(opt_pos, opt_vel, "kx", label="optimal")
 
     plt.legend()
-
     plt.show()
 
 
