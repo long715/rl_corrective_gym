@@ -266,16 +266,21 @@ class CorrectiveTransferEnvironment(gym.Env):
         if self.dyn_rew == 0:
             # corresponds to reward function 1
             delta: float = ngui_norm - gui_norm
-            reward = np.sign(delta) * (1 - 1 / (1 + abs(delta)))
+            tol_1: float = 1e6
+            reward = np.sign(delta) * (1 - tol_1 / (tol_1 + abs(delta)))
 
         elif self.dyn_rew == 1:
             # corresponds to reward function 2
-            reward = 1 / (1 + gui_norm) - 1
+            tol_2: float = 1e6
+            reward = tol_2 / (tol_2 + gui_norm) - 1
 
         elif self.dyn_rew == 2:
             # corresponds to reward function 3
-            prew: float = 1 / (1 + np.linalg.norm(gui_err[0:3]))
-            vrew: float = 1 / (1 + np.linalg.norm(gui_err[3:6]))
+            tol_3_pos: float = 1e6
+            tol_3_vel: float = 1e-1
+
+            prew: float = tol_3_pos / (tol_3_pos + np.linalg.norm(gui_err[0:3]))
+            vrew: float = tol_3_vel / (tol_3_vel + np.linalg.norm(gui_err[3:6]))
 
             reward = (1 - 3 / (1 + prew + vrew)) / 2
         else:
