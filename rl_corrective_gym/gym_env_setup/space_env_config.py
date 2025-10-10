@@ -4,7 +4,7 @@ class SpaceEnvironmentConfig:
 
     # defines if we want to reset to the same timestep
     single_run: bool
-    
+
     # defines the reward function to use
     dyn_rew: int
     effort_rew: int
@@ -16,4 +16,4 @@ class SpaceEnvironmentConfig:
     dyn_pos_sd: float = 1.0  # km
     dyn_vel_sd: float = 0.05  # km/s
 
-    max_corr: float = 0.01  # km/s
+    max_corr: float = 0.1  # km/s

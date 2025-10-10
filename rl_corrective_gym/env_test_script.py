@@ -184,12 +184,40 @@ def test_debug(df_id: int = 15):
     print(csv_vmax - np.linalg.norm(env._get_control_input(csv_vmax, action)))
 
 
+def test_opt_subset():
+    """
+    Aim of this test is to investigate the placement of the
+    optimal control subset ie. if they are dense/sparse,
+    scattered/concentrated.
+
+    This should help us determine the effects on the training
+    of the model.
+
+    Req: ran in single run
+    """
+    env: CorrectiveTransferEnvironment = test_init()
+
+    ax = plt.subplot(1, 1, 1, projection="3d")
+    plt.title("Optimal Actions for Different Noise Scenarios")
+
+    for _ in range(100):
+        env.reset()
+        env.is_single_reset = True
+        opt_control: np.ndarray = env._optimal_control()
+
+        ax.plot(opt_control[0], opt_control[1], opt_control[2], "rx", label="opt")
+
+    plt.show()
+
+
 def test_deviations():
+    df = pd.DataFrame()
+
     # single sample
     env: CorrectiveTransferEnvironment = test_init()
-    seed = 3
+    env.chosen_timestamp = 2
+    env.is_single_reset = False
     env.reset()
-    env.set_seed(seed)
 
     nom_terminal = env.nominal_traj[-1]
     ngui_terminal: np.ndarray = env._propagate(False)
@@ -207,9 +235,25 @@ def test_deviations():
     ax = plt.subplot(1, 2, 2, projection="3d")
     plt.title("Sampled Actions")
 
-    for _ in range(5000):
+    opt_control = env._optimal_control()
+    ax.plot(opt_control[0], opt_control[1], opt_control[2], "rx", label="opt")
+    print(opt_control)
+
+    # compute the max deviation from optimal control
+    print(f"dev: {env._get_control_input(vmax, [1,1,1,1]) - opt_control}")
+
+    for _ in range(1000):
         action = env.sample_action()
+
+        vel_var: float = 1e-3**2  # 1m/s - small deviation
+        cov: np.ndarray = np.diag([vel_var, vel_var, vel_var])
+        mean: np.ndarray = np.array([0] * 3)
+
+        # choose the gaussian noise for the chosen state
+        noise = np.random.multivariate_normal(mean, cov)
+
         corrective_impulse: np.ndarray = env._get_control_input(vmax, action)
+        # corrective_impulse = opt_control + noise
 
         # plot the deviations
         gui_terminal = env._propagate(True, corrective_impulse)
@@ -222,14 +266,32 @@ def test_deviations():
         )
 
         # want to see if control range is covered by sample
-        action_unit = action[0] * (action[1:4] / np.linalg.norm(action[1:4]))
-        ax.plot(action_unit[0], action_unit[1], action_unit[2], "rx")
+        # action_unit = action[0] * (action[1:4] / np.linalg.norm(action[1:4]))
+        ax.plot(
+            corrective_impulse[0],
+            corrective_impulse[1],
+            corrective_impulse[2],
+            "bx",
+            label="policy",
+        )
 
         if (
             np.linalg.norm(gui_terminal[0:3] - nom_terminal[0:3]) == 0
             and np.linalg.norm(gui_terminal[3:6] - nom_terminal[3:6]) == 0
         ):
             print("SUCCESS")
+
+        # log rewards
+        rewards = env._reward_function(
+            vmax,
+            corrective_impulse,
+            gui_terminal - nom_terminal,
+            ngui_terminal - nom_terminal,
+        )
+        df = pd.concat([df, pd.DataFrame([rewards])])
+
+    # save rewards
+    df.to_csv(f"policy_rewards.csv", index=False)
 
     plt.subplot(1, 2, 1)
     plt.title(f"Terminal Deviations for timestep {env.chosen_timestamp}")
@@ -297,6 +359,14 @@ def test_stm():
     print(opt_control)
 
 
+def test_optimal():
+    """
+    Aim is to the test the sensitivity of the control.
+    Initial implementation
+    """
+    pass
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -318,6 +388,7 @@ if __name__ == "__main__":
             "debug",
             "dev",
             "stm",
+            "opt_subset",
         ],
     )
     args = parser.parse_args()
@@ -340,5 +411,7 @@ if __name__ == "__main__":
         test_deviations()
     elif args.task == "stm":
         test_stm()
+    elif args.task == "opt_subset":
+        test_opt_subset()
     else:
         test_eval(args.algo)
