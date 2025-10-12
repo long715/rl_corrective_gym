@@ -236,7 +236,7 @@ class CorrectiveTransferEnvironment(gym.Env):
         gui_err: np.ndarray,
         ngui_err: np.ndarray,
     ) -> dict:
-        reward_dyn: float = self._reward_dynamics(gui_err, ngui_err)
+        reward_dyn: float = self._reward_dynamics(gui_err, ngui_err, vmax)
         reward_effort: float = self._reward_effort(control_imp)
         reward_misc: float = self._reward_misc(control_imp, vmax)
 
@@ -249,7 +249,9 @@ class CorrectiveTransferEnvironment(gym.Env):
             "misc": reward_misc,
         }
 
-    def _reward_dynamics(self, gui_err: np.ndarray, ngui_err: np.ndarray) -> float:
+    def _reward_dynamics(
+        self, gui_err: np.ndarray, ngui_err: np.ndarray, vmax: float
+    ) -> float:
         """
         Computes the reward associated to the state deviation.
 
@@ -265,9 +267,9 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         if self.dyn_rew == 0:
             # corresponds to reward function 1
-            delta: float = ngui_norm - gui_norm
-            tol_1: float = 1e6
-            reward = np.sign(delta) * (1 - tol_1 / (tol_1 + abs(delta)))
+            err_prop: float = gui_norm / ngui_norm
+            p: float = 1  # regularisation variable for steepness/sensitivity
+            reward = (1 - err_prop**p) / (1 + err_prop**p)
 
         elif self.dyn_rew == 1:
             # corresponds to reward function 2
@@ -276,13 +278,11 @@ class CorrectiveTransferEnvironment(gym.Env):
 
         elif self.dyn_rew == 2:
             # corresponds to reward function 3
-            tol_3_pos: float = 1e6
-            tol_3_vel: float = 1e-1
+            ngui_perr: float = np.linalg.norm(ngui_err[0:3])
+            prew: float = min(np.linalg.norm(gui_err[0:3]), ngui_perr) / ngui_perr
+            vrew: float = min(np.linalg.norm(gui_err[3:6]), vmax) / vmax
 
-            prew: float = tol_3_pos / (tol_3_pos + np.linalg.norm(gui_err[0:3]))
-            vrew: float = tol_3_vel / (tol_3_vel + np.linalg.norm(gui_err[3:6]))
-
-            reward = (1 - 3 / (1 + prew + vrew)) / 2
+            reward = (3 / (1 + prew + vrew)) - 2
         else:
             assert False, "No such dynamics reward function"
 
