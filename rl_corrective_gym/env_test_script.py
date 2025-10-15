@@ -27,6 +27,7 @@ from rl_corrective_gym.gym_env_setup.corrective_transfer_env import (
     CorrectiveTransferEnvironment,
 )
 from rl_corrective_gym.gym_env_setup.space_env_config import SpaceEnvironmentConfig
+from rl_corrective_gym.YA_STM import YA_STM
 
 
 def test_init() -> CorrectiveTransferEnvironment:
@@ -321,42 +322,46 @@ def test_deviations():
 
 
 def test_stm():
+    """
+    Use YA-STM as the analaytical STM for keplerian dynamics.
+    - Treat the nominal trajectory as the target trajectory and
+    - the perturbed state as the chaser
+
+    Only works for elliptical and small deviations.
+    """
     env: CorrectiveTransferEnvironment = test_init()
     env.set_seed(10)
     env.reset()
 
     # TEST NO GUID
     final_state = env.nominal_traj[-1, 0:6]
+    init_state = env.nominal_traj[env.chosen_timestamp, 0:6]
 
     start_prop = time.time()
     actual_dev = env._propagate(False)[0:6] - final_state
     print(f"elapsed prop: {time.time() - start_prop}")
 
-    # rand_imp = np.array([5.0, 1.0, 0.0])
-    # guid_dev = env._propagate(True, rand_imp)[0:6] - final_state
+    rand_imp = np.array([5.0, 1.0, 0.0])
+    guid_dev = env._propagate(True, rand_imp)[0:6] - final_state
 
     phi_compute = time.time()
-    phi = env._stm_pert()
+    tof: float = (env.num_timesteps - env.chosen_timestamp) * env.timestep
+    phi = YA_STM(env.noise, tof, env.sun_mu)
     print(f"phi compute: {time.time()-phi_compute}")
 
     start_phi = time.time()
     stm_dev = phi @ env.noise[0:6]
-    # guid_stm_dev = phi @ (
-    #     env.noise[0:6] + np.concatenate((np.array([0.0, 0.0, 0.0]), rand_imp))
-    # )
+    guid_stm_dev = phi @ (
+        env.noise[0:6] + np.concatenate((np.array([0.0, 0.0, 0.0]), rand_imp))
+    )
     print(f"elapsed phi: {time.time() - start_phi}")
 
     print(actual_dev, stm_dev)
     # print(guid_dev, guid_stm_dev)
 
-    # error for pos > tol; accurate enough
-    tol = 1e-5
-    # assert np.all(abs(actual_dev - stm_dev) < tol), "No Guid Error"
-    # assert np.all(abs(guid_dev - guid_stm_dev) < tol), "Guid Error"
-
     # TEST OPT CONTROL
-    opt_control = env._optimal_control()
-    print(opt_control)
+    # opt_control = env._optimal_control()
+    # print(opt_control)
 
 
 def test_optimal():
