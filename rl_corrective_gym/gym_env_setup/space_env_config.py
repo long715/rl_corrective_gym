@@ -5,6 +5,9 @@ class SpaceEnvironmentConfig:
     # defines if we want to reset to the same timestep
     single_run: bool
 
+    # defines the action space to use
+    action_config: int
+
     # defines the reward function to use
     dyn_rew: int
     effort_rew: int
