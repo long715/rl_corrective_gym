@@ -199,7 +199,7 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
             total_imp: np.ndarray = self._pseudo_optimal_control(A) + self.nom_imp
 
         ximp: np.ndarray = self.nominal_imp[-1, :]
-        xf: np.ndarray = self.nominal_traj[-1, :]  # xf+, inc nom imp
+        xf: np.ndarray = copy.deepcopy(self.nominal_traj[-1, :])  # xf+, inc nom imp
         xf[3:6] -= ximp  # xf-, w/o nom imp
 
         gui_xf: np.ndarray = self._propagate(True, total_imp)  # gui_xf-
@@ -220,8 +220,8 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
             "noise": self.noise,
             "vmax": self.vmax,
             "action": action,
-            "gui_terminal_state": gui_xf,
-            "no_gui_terminal_state": ngui_xf,
+            "gui_err": gui_err,
+            "ngui_err": ngui_err,
         }
 
         self.state = np.concatenate((xf, ximp, gui_xf))
@@ -456,9 +456,9 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
         Initialises the global state ie. choses the timestep and perturbation applied.
         """
         # NOTE: current implementation looks at resetting at the second last node
-        chosen_state: np.ndarray = self.nominal_traj[
-            self.chosen_timestamp, :
-        ]  # inc. imp
+        chosen_state: np.ndarray = copy.deepcopy(
+            self.nominal_traj[self.chosen_timestamp, :]
+        )  # inc. imp
         chosen_state[3:6] -= self.nom_imp
 
         # covariance matrix set up
