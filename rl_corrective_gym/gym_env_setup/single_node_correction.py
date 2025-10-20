@@ -83,7 +83,7 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
         self.nom_imp: np.ndarray = self.nominal_imp[self.chosen_timestamp, :]
 
         # the following are variables that will get UPDATED
-        self.state: np.ndarray = self.nominal_traj[self.chosen_timestamp, :]
+        self.state: np.ndarray = np.array([0] * 17)
         self.vmax: float = self._get_vmax()
         self.noise: np.ndarray = np.array([0] * 7)
 
@@ -386,8 +386,8 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
         total_impulse: np.ndarray = copy.deepcopy(
             self.nominal_imp[self.chosen_timestamp]
         )  # km/s
-        pos: np.ndarray = copy.deepcopy(self.state[0:3])  # km
-        vel: np.ndarray = copy.deepcopy(self.state[3:6])  # km/s (w/o imp)
+        pos: np.ndarray = copy.deepcopy(self.state[10:13])  # km
+        vel: np.ndarray = copy.deepcopy(self.state[13:16])  # km/s (w/o imp)
         m: float = copy.deepcopy(self.state[-1])  # kg
 
         if is_guid:
