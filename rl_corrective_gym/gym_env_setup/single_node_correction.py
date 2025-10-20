@@ -386,8 +386,8 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
         total_impulse: np.ndarray = copy.deepcopy(
             self.nominal_imp[self.chosen_timestamp]
         )  # km/s
-        pos: np.ndarray = copy.deepcopy(self.state[0:3])  # km
-        vel: np.ndarray = copy.deepcopy(self.state[3:6])  # km/s (w/o imp)
+        pos: np.ndarray = copy.deepcopy(self.state[10:13])  # km
+        vel: np.ndarray = copy.deepcopy(self.state[13:16])  # km/s (w/o imp)
         m: float = copy.deepcopy(self.state[-1])  # kg
 
         if is_guid:
