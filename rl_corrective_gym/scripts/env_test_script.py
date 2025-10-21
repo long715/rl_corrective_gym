@@ -20,14 +20,16 @@ import matplotlib.pyplot as plt
 
 # TODO: was used in the initial testing for preliminary validation, would like to
 # eventually update the test functions to use the new one
-from rl_corrective_gym.corrective_transfer_env import OldCorrectiveTransferEnvironment
+from rl_corrective_gym.environments.old_corrective_transfer_env import (
+    OldCorrectiveTransferEnvironment,
+)
 
 #  use for integration testing for actual training runsS
-from rl_corrective_gym.gym_env_setup.corrective_transfer_env import (
+from rl_corrective_gym.environments.corrective_transfer_env import (
     CorrectiveTransferEnvironment,
 )
-from rl_corrective_gym.gym_env_setup.space_env_config import SpaceEnvironmentConfig
-from rl_corrective_gym.YA_STM import YA_STM
+from rl_corrective_gym.environments.space_env_config import SpaceEnvironmentConfig
+from rl_corrective_gym.utils.YA_STM import YA_STM
 
 
 def test_init() -> CorrectiveTransferEnvironment:
@@ -62,6 +64,7 @@ def test_prop():
 
     # extension for propagate function
     env: CorrectiveTransferEnvironment = test_init()
+    env._init_logs()
     _final_state: np.ndarray = env._propagate(False)
 
     assert np.all(final_state == _final_state), "Error in propagator function"

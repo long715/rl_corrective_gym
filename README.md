@@ -14,7 +14,7 @@ notes:
 
 # Run
 
-`python run.py train config --data_path ../../rl_corrective_gym/rl_corrective_gym/space_configs`
+`python run.py train config --data_path ../../rl_corrective_gym/rl_corrective_gym/configurations/space_configs`
 
 - need to use / in MacOS
 - mps not supported, need to use cpu in MacOS

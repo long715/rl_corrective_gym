@@ -24,15 +24,15 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from daceypy import DA, array
 
-from rl_corrective_gym.gym_env_setup.space_env_config import SpaceEnvironmentConfig
-from rl_corrective_gym.RK78 import RK78
+from rl_corrective_gym.space_env_config import SpaceEnvironmentConfig
+from rl_corrective_gym.utils.RK78 import RK78
 
 # CONSTANTS
 AU = 1.49597870691e8  # km
 DAY = 86400
 
 
-class SingleCorrectiveTransferEnvironment(gym.Env):
+class CorrectiveTransferEnvironment(gym.Env):
     def __init__(
         self,
         config: SpaceEnvironmentConfig,
@@ -393,6 +393,7 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
         if is_guid:
             total_impulse = action
 
+        print(self.state)
         vel += total_impulse
 
         # logging
@@ -517,7 +518,6 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
         full_phi: np.ndarray = self._stm_pert()
         # A is the second half of the STM (6x3), impact of vel dev
         A: np.ndarray = full_phi[:, 3:6]
-        print(A)
         A_T: np.ndarray = np.transpose(A)
 
         return -(np.linalg.inv(A_T @ A) @ A_T) @ self.noise[0:6] - self.noise[3:6]
