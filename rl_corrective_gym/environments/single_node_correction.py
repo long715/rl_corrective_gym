@@ -83,7 +83,7 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
         self.nom_imp: np.ndarray = self.nominal_imp[self.chosen_timestamp, :]
 
         # the following are variables that will get UPDATED
-        self.state: np.ndarray = np.array([0] * 17)
+        self.state: np.ndarray = self.nominal_traj[self.chosen_timestamp, :]
         self.vmax: float = self._get_vmax()
         self.noise: np.ndarray = np.array([0] * 7)
 
@@ -244,8 +244,8 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
         else:
             # TODO: investigate threshold to deviations for better representation here
             self.action_space: spaces.Box = spaces.Box(
-                low=np.concatenate((np.array(9 * [AU]), np.array(9 * [self.ve]))),
-                high=-np.concatenate((np.array(9 * [AU]), np.array(9 * [self.ve]))),
+                low=np.concatenate((np.array(9 * [-AU]), np.array(9 * [-self.ve]))),
+                high=np.concatenate((np.array(9 * [AU]), np.array(9 * [self.ve]))),
                 dtype=np.float64,
             )
 
@@ -532,4 +532,9 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
         """
         A_T: np.ndarray = np.transpose(A)
 
-        return -(np.linalg.inv(A_T @ A) @ A_T) @ self.noise[0:6] - self.noise[3:6]
+        try: 
+            opt_imp: np.ndarray = -(np.linalg.inv(A_T @ A) @ A_T) @ self.noise[0:6] - self.noise[3:6]
+        except np.linalg.LinAlgError:
+            opt_imp: np.ndarray = np.array([0. ,0. ,0.])
+
+        return opt_imp
