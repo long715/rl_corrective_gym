@@ -1,1 +1,1 @@
-from . import nominal_trajectory
+from .configurations import nominal_trajectory

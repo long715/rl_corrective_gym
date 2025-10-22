@@ -1,4 +1,8 @@
-class SpaceEnvironmentConfig:
+from cares_reinforcement_learning.util.configurations import SubscriptableClass
+
+
+class SpaceEnvironmentConfig(SubscriptableClass):
+
     traj_filename: str
     impulse_filename: str
 

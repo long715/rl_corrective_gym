@@ -1,5 +1,6 @@
 {
   "gym": "space",
+  "domain": "single",
   "task": "mars",
 
   "traj_filename": "SCP_impulsive_traj.csv",

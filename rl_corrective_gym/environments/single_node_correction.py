@@ -24,8 +24,8 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from daceypy import DA, array
 
-from rl_corrective_gym.gym_env_setup.space_env_config import SpaceEnvironmentConfig
-from rl_corrective_gym.RK78 import RK78
+from rl_corrective_gym.space_env_config import SpaceEnvironmentConfig
+from rl_corrective_gym.utils.RK78 import RK78
 
 # CONSTANTS
 AU = 1.49597870691e8  # km
@@ -181,7 +181,7 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
     def get_overlay_info(self) -> dict:
         return {}
 
-    def reset(self, *, training: bool = True) -> np.ndarray:
+    def reset(self) -> np.ndarray:
         super().reset()
         self._init_logs()
         self._init_state()
@@ -256,7 +256,7 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
         gui_err: np.ndarray,
         ngui_err: np.ndarray,
     ) -> dict:
-        reward_dyn: float = self._reward_dynamics(gui_err, ngui_err)
+        reward_dyn: float = self._reward_dynamics(gui_err, ngui_err, vmax)
         reward_effort: float = self._reward_effort(total_imp)
         reward_misc: float = self._reward_misc(total_imp, vmax)
 
