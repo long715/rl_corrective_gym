@@ -111,11 +111,11 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
 
     @cached_property
     def max_action_value(self) -> float:
-        return self.action_space.high[0]
+        return self.action_space.high
 
     @cached_property
     def min_action_value(self) -> float:
-        return self.action_space.low[0]
+        return self.action_space.low
 
     @cached_property
     def observation_space_shape(self) -> int:
