@@ -2,6 +2,7 @@ from cares_reinforcement_learning.util.configurations import SubscriptableClass
 
 
 class SpaceEnvironmentConfig(SubscriptableClass):
+    domain: str
 
     traj_filename: str
     impulse_filename: str

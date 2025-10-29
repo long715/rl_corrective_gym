@@ -189,14 +189,7 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
         return self.state
 
     def step(self, action) -> tuple:
-
-        if self.action_config == 0:
-            total_imp: np.ndarray = action
-        elif self.action_config == 1:
-            total_imp: np.ndarray = self.nom_imp + action
-        else:
-            A: np.ndarray = np.reshape(action, (6, 3))
-            total_imp: np.ndarray = self._pseudo_optimal_control(A) + self.nom_imp
+        total_imp = self._get_control_from_action(action)
 
         ximp: np.ndarray = self.nominal_imp[-1, :]
         xf: np.ndarray = copy.deepcopy(self.nominal_traj[-1, :])  # xf+, inc nom imp
@@ -248,6 +241,17 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
                 high=np.concatenate((np.array(9 * [AU]), np.array(9 * [self.ve]))),
                 dtype=np.float64,
             )
+
+    def _get_control_from_action(self, action):
+        if self.action_config == 0:
+            total_imp: np.ndarray = action
+        elif self.action_config == 1:
+            total_imp: np.ndarray = self.nom_imp + action
+        else:
+            A: np.ndarray = np.reshape(action, (6, 3))
+            total_imp: np.ndarray = self._pseudo_optimal_control(A) + self.nom_imp
+
+        return total_imp
 
     def _reward_function(
         self,
@@ -389,7 +393,6 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
         pos: np.ndarray = copy.deepcopy(self.state[10:13])  # km
         vel: np.ndarray = copy.deepcopy(self.state[13:16])  # km/s (w/o imp)
         m: float = copy.deepcopy(self.state[-1])  # kg
-
         if is_guid:
             total_impulse = action
 
@@ -517,7 +520,6 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
         full_phi: np.ndarray = self._stm_pert()
         # A is the second half of the STM (6x3), impact of vel dev
         A: np.ndarray = full_phi[:, 3:6]
-        print(A)
         A_T: np.ndarray = np.transpose(A)
 
         return -(np.linalg.inv(A_T @ A) @ A_T) @ self.noise[0:6] - self.noise[3:6]
@@ -532,9 +534,12 @@ class SingleCorrectiveTransferEnvironment(gym.Env):
         """
         A_T: np.ndarray = np.transpose(A)
 
-        try: 
-            opt_imp: np.ndarray = -(np.linalg.inv(A_T @ A) @ A_T) @ self.noise[0:6] - self.noise[3:6]
+        try:
+            opt_imp: np.ndarray = (
+                -(np.linalg.inv(A_T @ A) @ A_T) @ self.noise[0:6] - self.noise[3:6]
+            )
         except np.linalg.LinAlgError:
-            opt_imp: np.ndarray = np.array([0. ,0. ,0.])
+            print("ERROR: Singularity")
+            opt_imp: np.ndarray = np.array([0.0, 0.0, 0.0])
 
         return opt_imp
